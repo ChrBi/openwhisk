@@ -2,6 +2,19 @@ apply plugin: 'scala'
 apply plugin: 'eclipse'
 compileTestScala.options.encoding = 'UTF-8'
 
+buildscript {
+  repositories {
+    maven {
+      url "https://plugins.gradle.org/m2/"
+    }
+  }
+  dependencies {
+    classpath "gradle.plugin.com.github.maiflai:gradle-scalatest:0.15"
+  }
+}
+
+apply plugin: 'com.github.maiflai.scalatest'
+
 repositories {
     mavenCentral()
 }
@@ -24,17 +37,20 @@ task testLean(type: Test) {
 }
 
 // Add all images needed for local testing here
-test.dependsOn([
-    ':core:nodejs6Action:distDocker',
-    ':core:actionProxy:distDocker',
-    ':core:pythonAction:distDocker',
-    ':core:python2Action:distDocker',
-    ':core:javaAction:distDocker',
-    ':core:swift3Action:distDocker',
-    ':sdk:docker:distDocker',
-    ':tests:dat:blackbox:badaction:distDocker',
-    ':tests:dat:blackbox:badproxy:distDocker'
-])
+test {
+    maxParallelForks = 8
+    dependsOn([
+        ':core:nodejs6Action:distDocker',
+        ':core:actionProxy:distDocker',
+        ':core:pythonAction:distDocker',
+        ':core:python2Action:distDocker',
+        ':core:javaAction:distDocker',
+        ':core:swift3Action:distDocker',
+        ':sdk:docker:distDocker',
+        ':tests:dat:blackbox:badaction:distDocker',
+        ':tests:dat:blackbox:badproxy:distDocker'
+    ])
+}
 
 dependencies {
     compile "org.scala-lang:scala-library:${gradle.scala.version}"
@@ -51,6 +67,9 @@ dependencies {
     compile project(':common:scala')
     compile project(':core:controller')
     compile project(':core:invoker')
+
+    testCompile 'org.scalatest:scalatest_2.11:3.0.1'
+    testRuntime 'org.pegdown:pegdown:1.4.2'
 }
 
 tasks.withType(ScalaCompile) {

@@ -26,6 +26,7 @@ import org.junit.runner.RunWith
 import org.scalatest.FlatSpec
 import org.scalatest.Matchers
 import org.scalatest.concurrent.IntegrationPatience
+import org.scalatest.ParallelTestExecution
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.junit.JUnitRunner
 
@@ -48,6 +49,7 @@ class ReplicatorTests extends FlatSpec
     with ScalaFutures
     with WskActorSystem
     with IntegrationPatience
+    with ParallelTestExecution
     with WaitFor
     with StreamLogging {
 
@@ -59,6 +61,7 @@ class ReplicatorTests extends FlatSpec
         dbHost -> null,
         dbPort -> null,
         dbPrefix -> null))
+
     val testDbPrefix = s"replicatortest_${config.dbPrefix}"
     val dbUrl = s"${config.dbProtocol}://${config.dbUsername}:${config.dbPassword}@${config.dbHost}:${config.dbPort}"
 
@@ -189,8 +192,9 @@ class ReplicatorTests extends FlatSpec
     behavior of "Database replication script"
 
     it should "replicate a database (snapshot)" in {
+        val prefix = testDbPrefix + 1 + "_"
         // Create a database to backup
-        val dbName = testDbPrefix + "database_for_single_replication"
+        val dbName = prefix + "database_for_single_replication"
         val client = createDatabase(dbName)
 
         println(s"Creating testdocument")
@@ -198,7 +202,7 @@ class ReplicatorTests extends FlatSpec
         client.putDoc("testId", testDocument).futureValue
 
         // Trigger replication and verify the created databases have the correct format
-        val (createdBackupDbs, _) = runReplicator(dbUrl, dbUrl, testDbPrefix, 10.minutes)
+        val (createdBackupDbs, _) = runReplicator(dbUrl, dbUrl, prefix, 10.minutes)
         createdBackupDbs should have size 1
         val backupDbName = createdBackupDbs.head
         backupDbName should fullyMatch regex s"backup_\\d+_$dbName"
@@ -215,8 +219,9 @@ class ReplicatorTests extends FlatSpec
     }
 
     it should "replicate a database (snapshot) even if the filter is not available" in {
+        val prefix = testDbPrefix + 2 + "_"
         // Create a db to backup
-        val dbName = testDbPrefix + "database_for_snapshout_without_filter"
+        val dbName = prefix + "database_for_snapshout_without_filter"
         val client = createDatabase(dbName, false)
 
         println("Creating testdocuments")
@@ -233,7 +238,7 @@ class ReplicatorTests extends FlatSpec
         }
 
         // Trigger replication and verify the created databases have the correct format
-        val (createdBackupDbs, _) = runReplicator(dbUrl, dbUrl, testDbPrefix, 10.minutes)
+        val (createdBackupDbs, _) = runReplicator(dbUrl, dbUrl, prefix, 10.minutes)
         createdBackupDbs should have size 1
         val backupDbName = createdBackupDbs.head
         backupDbName should fullyMatch regex s"backup_\\d+_$dbName"
@@ -250,8 +255,9 @@ class ReplicatorTests extends FlatSpec
     }
 
     it should "replicate a database (snapshot) and deleted documents and design documents should not be in the snapshot" in {
+        val prefix = testDbPrefix + 3 + "_"
         // Create a database to backup
-        val dbName = testDbPrefix + "database_for_single_replication_design_and_deleted_docs"
+        val dbName = prefix + "database_for_single_replication_design_and_deleted_docs"
         val client = createDatabase(dbName)
 
         println(s"Creating testdocument")
@@ -275,7 +281,7 @@ class ReplicatorTests extends FlatSpec
         client.deleteDoc(idOfDeletedDocument, documents(indexOfDocumentToDelete).fields("rev").convertTo[String])
 
         // Trigger replication and verify the created databases have the correct format
-        val (createdBackupDbs, _) = runReplicator(dbUrl, dbUrl, testDbPrefix, 10.minutes)
+        val (createdBackupDbs, _) = runReplicator(dbUrl, dbUrl, prefix, 10.minutes)
         createdBackupDbs should have size 1
         val backupDbName = createdBackupDbs.head
         backupDbName should fullyMatch regex s"backup_\\d+_$dbName"
@@ -301,12 +307,13 @@ class ReplicatorTests extends FlatSpec
     }
 
     it should "continuously update a database" in {
+        val prefix = testDbPrefix + 4 + "_"
         // Create a database to backup
-        val dbName = testDbPrefix + "database_for_continous_replication"
+        val dbName = prefix + "database_for_continous_replication"
         val client = createDatabase(dbName)
 
         // Trigger replication and verify the created databases have the correct format
-        val (createdBackupDbs, _) = runReplicator(dbUrl, dbUrl, testDbPrefix, 10.minutes, true)
+        val (createdBackupDbs, _) = runReplicator(dbUrl, dbUrl, prefix, 10.minutes, true)
         createdBackupDbs should have size 1
         val backupDbName = createdBackupDbs.head
         backupDbName shouldBe s"continuous_$dbName"
@@ -338,6 +345,7 @@ class ReplicatorTests extends FlatSpec
     }
 
     it should "remove outdated databases" in {
+        val prefix = testDbPrefix + 5 + "_"
         val now = Instant.now()
         val expires = 10.minutes
 
@@ -345,16 +353,16 @@ class ReplicatorTests extends FlatSpec
 
         // Create a database that is already expired
         val expired = now.minus(expires + 5.minutes)
-        val expiredName = s"backup_${toEpochSeconds(expired)}_${testDbPrefix}expired_backup"
+        val expiredName = s"backup_${toEpochSeconds(expired)}_${prefix}expired_backup"
         val expiredClient = createDatabase(expiredName)
 
         // Create a database that is not yet expired
         val notExpired = now.plus(expires - 5.minutes)
-        val notExpiredName = s"backup_${toEpochSeconds(notExpired)}_${testDbPrefix}notexpired_backup"
+        val notExpiredName = s"backup_${toEpochSeconds(notExpired)}_${prefix}notexpired_backup"
         val notExpiredClient = createDatabase(notExpiredName)
 
         // Trigger replication and verify the expired database is deleted while the unexpired one is kept
-        val (createdDatabases, deletedDatabases) = runReplicator(dbUrl, dbUrl, testDbPrefix, expires)
+        val (createdDatabases, deletedDatabases) = runReplicator(dbUrl, dbUrl, prefix, expires)
         deletedDatabases should (contain(expiredName) and not contain (notExpiredName))
 
         expiredClient.getAllDocs().futureValue shouldBe Left(StatusCodes.NotFound)
@@ -366,6 +374,7 @@ class ReplicatorTests extends FlatSpec
     }
 
     it should "not remove outdated databases with other prefix" in {
+        val prefix = testDbPrefix + 6 + "_"
         val now = Instant.now()
         val expires = 10.minutes
 
@@ -374,7 +383,7 @@ class ReplicatorTests extends FlatSpec
         val expired = now.minus(expires + 5.minutes)
 
         // Create a database that is expired with correct prefix
-        val correctPrefixName = s"backup_${toEpochSeconds(expired)}_${testDbPrefix}expired_backup_correct_prefix"
+        val correctPrefixName = s"backup_${toEpochSeconds(expired)}_${prefix}expired_backup_correct_prefix"
         val correctPrefixClient = createDatabase(correctPrefixName)
 
         // Create a database that is expired with wrong prefix
@@ -383,7 +392,7 @@ class ReplicatorTests extends FlatSpec
         val wrongPrefixClient = createDatabase(wrongPrefixName)
 
         // Trigger replication and verify the expired database with correct prefix is deleted while the db with the wrong prefix is kept
-        val (createdDatabases, deletedDatabases) = runReplicator(dbUrl, dbUrl, testDbPrefix, expires)
+        val (createdDatabases, deletedDatabases) = runReplicator(dbUrl, dbUrl, prefix, expires)
         deletedDatabases should (contain(correctPrefixName) and not contain (wrongPrefixName))
 
         correctPrefixClient.getAllDocs().futureValue shouldBe Left(StatusCodes.NotFound)
@@ -395,8 +404,9 @@ class ReplicatorTests extends FlatSpec
     }
 
     it should "replay a database" in {
+        val prefix = testDbPrefix + 7 + "_"
         val now = Instant.now()
-        val dbName = testDbPrefix + "database_to_be_restored"
+        val dbName = prefix + "database_to_be_restored"
         val backupPrefix = s"backup_${toEpochSeconds(now)}_"
         val backupDbName = backupPrefix + dbName
 
