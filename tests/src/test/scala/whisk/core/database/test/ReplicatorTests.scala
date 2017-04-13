@@ -216,6 +216,8 @@ class ReplicatorTests extends FlatSpec
         // Remove all created databases
         createdBackupDbs.foreach(removeDatabase(_))
         removeDatabase(dbName)
+
+        createdBackupDbs should have size 2
     }
 
     it should "replicate a database (snapshot) even if the filter is not available" in {
