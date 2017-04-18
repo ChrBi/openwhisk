@@ -38,7 +38,7 @@ task testLean(type: Test) {
 
 // Add all images needed for local testing here
 test {
-    maxParallelForks = 8
+    maxParallelForks = 0
     dependsOn([
         ':core:nodejs6Action:distDocker',
         ':core:actionProxy:distDocker',
