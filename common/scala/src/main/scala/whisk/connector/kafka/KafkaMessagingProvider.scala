@@ -21,19 +21,15 @@ import java.util.Properties
 import java.util.concurrent.ExecutionException
 
 import akka.actor.ActorSystem
-
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.FiniteDuration
-import scala.collection.JavaConverters._
-import org.apache.kafka.clients.admin.AdminClientConfig
-import org.apache.kafka.clients.admin.AdminClient
-import org.apache.kafka.clients.admin.NewTopic
+import akka.stream.scaladsl.Source
+import org.apache.kafka.clients.admin.{AdminClient, AdminClientConfig, NewTopic}
 import org.apache.kafka.common.errors.TopicExistsException
 import whisk.common.Logging
 import whisk.core.WhiskConfig
-import whisk.core.connector.MessageConsumer
-import whisk.core.connector.MessageProducer
-import whisk.core.connector.MessagingProvider
+import whisk.core.connector.{MessageProducer, MessagingProvider}
+
+import scala.collection.JavaConverters._
+import scala.concurrent.ExecutionContext
 
 import pureconfig._
 
@@ -52,9 +48,10 @@ case class TopicConfig(segmentBytes: Long, retentionBytes: Long, retentionMs: Lo
  * A Kafka based implementation of MessagingProvider
  */
 object KafkaMessagingProvider extends MessagingProvider {
-  def getConsumer(config: WhiskConfig, groupId: String, topic: String, maxPeek: Int, maxPollInterval: FiniteDuration)(
-    implicit logging: Logging): MessageConsumer =
-    new KafkaConsumerConnector(config.kafkaHosts, groupId, topic, maxPeek, maxPollInterval = maxPollInterval)
+  def getConsumer(kafkaHosts: String, group: String, topic: String, maxBatchSize: Int)(
+    implicit actorSystem: ActorSystem): Source[String, _] = {
+    OwKafkaConsumer.bufferedSource(kafkaHosts, group, topic, maxBatchSize)
+  }
 
   def getProducer(config: WhiskConfig, ec: ExecutionContext)(implicit actorSystem: ActorSystem,
                                                              logging: Logging): MessageProducer =

@@ -26,9 +26,8 @@ import org.apache.kafka.common.errors.RecordTooLargeException
 import spray.json.DefaultJsonProtocol._
 import spray.json._
 import whisk.common.{Logging, LoggingMarkers, TransactionId}
-import whisk.connector.kafka.OwKafkaConsumer
 import whisk.core.WhiskConfig
-import whisk.core.connector.{ActivationMessage, CompletionMessage, MessageFeed, MessageProducer}
+import whisk.core.connector.{ActivationMessage, CompletionMessage, MessageProducer, MessagingProvider}
 import whisk.core.containerpool._
 import whisk.core.containerpool.logging.LogStoreProvider
 import whisk.core.database.NoDocumentException
@@ -81,6 +80,7 @@ class InvokerReactive(config: WhiskConfig, instance: InstanceId, producer: Messa
   /** Initialize message consumers */
   val topic = s"invoker${instance.toInt}"
   val maximumContainers = config.invokerNumCore.toInt * config.invokerCoreShare.toInt
+  val msgProvider = SpiLoader.get[MessagingProvider]
 
   /** Sends an active-ack. */
   val ack = (tid: TransactionId,
@@ -132,9 +132,9 @@ class InvokerReactive(config: WhiskConfig, instance: InstanceId, producer: Messa
     ContainerPool
       .props(childFactory, maximumContainers, maximumContainers, Some(PrewarmingConfig(2, prewarmExec, 256.MB))))
 
-  OwKafkaConsumer
-    .bufferedSource(config.kafkaHosts, topic, topic, maximumContainers * 2)
-    .map(msg => ActivationMessage.parse(msg.value))
+  msgProvider
+    .getConsumer(config.kafkaHosts, topic, topic, maximumContainers * 2)
+    .map(msg => ActivationMessage.parse(msg))
     .filter {
       case Success(_) => true
       case Failure(t) =>
@@ -208,5 +208,5 @@ class InvokerReactive(config: WhiskConfig, instance: InstanceId, producer: Messa
     }
     // Per docs, Resume will just drop failed message
     .withAttributes(ActorAttributes.supervisionStrategy({ case _ => Supervision.Resume }))
-    .runWith(Sink.actorRefWithAck(pool, FlowControl.Initialize, MessageFeed.Processed, FlowControl.Ignore))
+    .runWith(Sink.actorRefWithAck(pool, FlowControl.Initialize, FlowControl.Processed, FlowControl.Ignore))
 }

@@ -30,7 +30,6 @@ import whisk.core.entity.CodeExec
 import whisk.core.entity.EntityName
 import whisk.core.entity.ExecutableWhiskAction
 import whisk.core.entity.size._
-import whisk.core.connector.MessageFeed
 
 sealed trait WorkerState
 case object Busy extends WorkerState
@@ -39,6 +38,7 @@ case object Free extends WorkerState
 object FlowControl {
   case object Initialize
   case object Ignore
+  case object Processed
 }
 
 case class WorkerData(data: ContainerData, state: WorkerState)
@@ -86,7 +86,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   def receive: Receive = {
     case FlowControl.Initialize =>
       feed = sender()
-      (0 to maxActiveContainers).foreach(_ => feed ! MessageFeed.Processed)
+      (0 to maxActiveContainers).foreach(_ => feed ! FlowControl.Processed)
 
     // A job to run on a container
     case r: Run =>
@@ -127,7 +127,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       freePool = freePool + (sender() -> data)
       busyPool.get(sender()).foreach { _ =>
         busyPool = busyPool - sender()
-        feed ! MessageFeed.Processed
+        feed ! FlowControl.Processed
       }
 
     // Container is prewarmed and ready to take work
@@ -139,7 +139,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       freePool = freePool - sender()
       busyPool.get(sender()).foreach { _ =>
         busyPool = busyPool - sender()
-        feed ! MessageFeed.Processed
+        feed ! FlowControl.Processed
       }
   }
 
