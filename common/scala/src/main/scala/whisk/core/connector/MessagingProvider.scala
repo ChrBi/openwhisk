@@ -17,6 +17,8 @@
 
 package whisk.core.connector
 
+import akka.actor.ActorSystem
+
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
@@ -33,6 +35,8 @@ trait MessagingProvider extends Spi {
                   topic: String,
                   maxPeek: Int = Int.MaxValue,
                   maxPollInterval: FiniteDuration = 5.minutes)(implicit logging: Logging): MessageConsumer
-  def getProducer(config: WhiskConfig, ec: ExecutionContext)(implicit logging: Logging): MessageProducer
-  def ensureTopic(config: WhiskConfig, topic: String, topicConfig: String)(implicit logging: Logging): Boolean
+  def getProducer(config: WhiskConfig, ec: ExecutionContext)(implicit actorSystem: ActorSystem,
+                                                             logging: Logging): MessageProducer
+  def ensureTopic(config: WhiskConfig, topic: String, topicConfig: String)(
+    implicit logging: Logging): Boolean
 }

@@ -17,32 +17,46 @@
 
 package whisk.connector.kafka
 
-import java.util.Properties
-
-import scala.concurrent.ExecutionContext
-import scala.concurrent.Future
-import scala.concurrent.Promise
-import scala.util.Failure
-import scala.util.Success
-import org.apache.kafka.clients.producer.Callback
-import org.apache.kafka.clients.producer.KafkaProducer
-import org.apache.kafka.clients.producer.ProducerConfig
-import org.apache.kafka.clients.producer.ProducerRecord
-import org.apache.kafka.clients.producer.RecordMetadata
-import org.apache.kafka.common.errors.NotLeaderForPartitionException
+import akka.actor.ActorSystem
+import akka.kafka.scaladsl.Producer
+import akka.kafka.{ProducerMessage, ProducerSettings}
+import akka.stream.scaladsl.{Sink, Source, SourceQueueWithComplete}
+import akka.stream.{ActorMaterializer, OverflowStrategy}
+import org.apache.kafka.clients.producer.{ProducerRecord, RecordMetadata}
 import org.apache.kafka.common.serialization.StringSerializer
-import whisk.common.Counter
-import whisk.common.Logging
-import whisk.core.connector.Message
-import whisk.core.connector.MessageProducer
+import whisk.common.{Counter, Logging}
+import whisk.core.connector.{Message, MessageProducer}
 import whisk.core.entity.UUIDs
 
-class KafkaProducerConnector(kafkahosts: String,
-                             implicit val executionContext: ExecutionContext,
-                             id: String = UUIDs.randomUUID().toString)(implicit logging: Logging)
+import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.util.{Failure, Success}
+
+class KafkaProducerConnector(
+  kafkahosts: String,
+  implicit val executionContext: ExecutionContext,
+  id: String = UUIDs.randomUUID().toString)(implicit actorSystem: ActorSystem, logging: Logging)
     extends MessageProducer {
 
   override def sentCount() = sentCounter.cur
+
+  private implicit val materializer = ActorMaterializer()
+
+  val source =
+    Source.queue[(ProducerRecord[String, String], Promise[RecordMetadata])](Int.MaxValue, OverflowStrategy.dropNew)
+  val producerSettings = ProducerSettings(actorSystem, new StringSerializer, new StringSerializer)
+    .withBootstrapServers(kafkahosts)
+
+  val kafkaProducer: SourceQueueWithComplete[(ProducerRecord[String, String], Promise[RecordMetadata])] = source
+    .map {
+      case (msg, prom) =>
+        ProducerMessage.Message(msg, prom)
+    }
+    .via(Producer.flow(producerSettings))
+    .map { result =>
+      result.message.passThrough.success(result.metadata)
+    }
+    .to(Sink.ignore)
+    .run()
 
   /** Sends msg to topic. This is an asynchronous operation. */
   override def send(topic: String, msg: Message, retry: Int = 2): Future[RecordMetadata] = {
@@ -52,12 +66,7 @@ class KafkaProducerConnector(kafkahosts: String,
     logging.debug(this, s"sending to topic '$topic' msg '$msg'")
     val produced = Promise[RecordMetadata]()
 
-    producer.send(record, new Callback {
-      override def onCompletion(metadata: RecordMetadata, exception: Exception): Unit = {
-        if (exception == null) produced.success(metadata)
-        else produced.failure(exception)
-      }
-    })
+    kafkaProducer.offer((record, produced))
 
     produced.future.andThen {
       case Success(status) =>
@@ -65,36 +74,16 @@ class KafkaProducerConnector(kafkahosts: String,
         sentCounter.next()
       case Failure(t) =>
         logging.error(this, s"sending message on topic '$topic' failed: ${t.getMessage}")
-    } recoverWith {
-      case t: NotLeaderForPartitionException =>
-        if (retry > 0) {
-          logging.error(this, s"NotLeaderForPartitionException is retryable, remain $retry retry")
-          Thread.sleep(100)
-          send(topic, msg, retry - 1)
-        } else produced.future
     }
   }
 
   /** Closes producer. */
   override def close() = {
-    logging.info(this, "closing producer")
-    producer.close()
+    kafkaProducer.complete()
   }
 
   private val sentCounter = new Counter()
 
-  private def getProps: Properties = {
-    val props = new Properties
-    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkahosts)
-    props.put(ProducerConfig.ACKS_CONFIG, 1.toString)
-    props
-  }
-
-  private def getProducer(props: Properties): KafkaProducer[String, String] = {
-    val keySerializer = new StringSerializer
-    val valueSerializer = new StringSerializer
-    new KafkaProducer(props, keySerializer, valueSerializer)
-  }
-
-  private val producer = getProducer(getProps)
+  // TODO ??
+//    props.put(ProducerConfig.ACKS_CONFIG, 1.toString)
 }

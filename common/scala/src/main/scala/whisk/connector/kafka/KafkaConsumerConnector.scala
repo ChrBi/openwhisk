@@ -19,18 +19,13 @@ package whisk.connector.kafka
 
 import java.util.Properties
 
-import scala.collection.JavaConversions.iterableAsScalaIterable
-import scala.collection.JavaConversions.seqAsJavaList
-import scala.concurrent.duration.Duration
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.duration.FiniteDuration
-
-import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.kafka.clients.consumer.KafkaConsumer
+import org.apache.kafka.clients.consumer.{ConsumerConfig, KafkaConsumer}
 import org.apache.kafka.common.serialization.ByteArrayDeserializer
-
 import whisk.common.Logging
 import whisk.core.connector.MessageConsumer
+
+import scala.collection.JavaConversions.{iterableAsScalaIterable, seqAsJavaList}
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 
 class KafkaConsumerConnector(kafkahost: String,
                              groupid: String,

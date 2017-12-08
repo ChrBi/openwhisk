@@ -17,34 +17,18 @@
 
 package whisk.core.invoker
 
-import java.nio.charset.StandardCharsets
 import java.time.Instant
 
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import scala.util.Failure
-import scala.util.Success
-import org.apache.kafka.common.errors.RecordTooLargeException
-import akka.actor.ActorRefFactory
-import akka.actor.ActorSystem
-import akka.kafka.ConsumerMessage.CommittableOffsetBatch
-import akka.kafka.{ConsumerSettings, Subscriptions}
-import akka.kafka.scaladsl.Consumer
-import akka.stream.{ActorAttributes, ActorMaterializer, Supervision}
+import akka.actor.{ActorRefFactory, ActorSystem}
 import akka.stream.scaladsl.Sink
-import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.kafka.common.serialization.{ByteArrayDeserializer, StringDeserializer}
-import spray.json._
+import akka.stream.{ActorAttributes, ActorMaterializer, Supervision}
+import org.apache.kafka.common.errors.RecordTooLargeException
 import spray.json.DefaultJsonProtocol._
-import whisk.common.Logging
-import whisk.common.LoggingMarkers
-import whisk.common.TransactionId
+import spray.json._
+import whisk.common.{Logging, LoggingMarkers, TransactionId}
+import whisk.connector.kafka.OwKafkaConsumer
 import whisk.core.WhiskConfig
-import whisk.core.connector.ActivationMessage
-import whisk.core.connector.CompletionMessage
-import whisk.core.connector.MessageFeed
-import whisk.core.connector.MessageProducer
-import whisk.core.connector.MessagingProvider
+import whisk.core.connector.{ActivationMessage, CompletionMessage, MessageFeed, MessageProducer}
 import whisk.core.containerpool._
 import whisk.core.containerpool.logging.LogStoreProvider
 import whisk.core.database.NoDocumentException
@@ -53,7 +37,8 @@ import whisk.core.entity.size._
 import whisk.http.Messages
 import whisk.spi.SpiLoader
 
-import scala.collection.immutable.Queue
+import scala.concurrent.Future
+import scala.util.{Failure, Success}
 
 class InvokerReactive(config: WhiskConfig, instance: InstanceId, producer: MessageProducer)(
   implicit actorSystem: ActorSystem,
@@ -147,23 +132,8 @@ class InvokerReactive(config: WhiskConfig, instance: InstanceId, producer: Messa
     ContainerPool
       .props(childFactory, maximumContainers, maximumContainers, Some(PrewarmingConfig(2, prewarmExec, 256.MB))))
 
-  val settings = ConsumerSettings(actorSystem, new ByteArrayDeserializer, new StringDeserializer)
-    .withBootstrapServers(config.kafkaHosts)
-    .withGroupId(topic)
-    .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
-
-  val stream = Consumer
-    .committableSource(settings, Subscriptions.topics(topic))
-    .batch(maximumContainers * 2, Queue(_))(_ :+ _)
-    .mapAsync(4) { msgs =>
-      msgs
-        .foldLeft(CommittableOffsetBatch.empty)((batch, msg) => batch.updated(msg.committableOffset))
-        .commitScaladsl()
-        .map { _ =>
-          msgs.map(_.record)
-        }
-    }
-    .mapConcat(identity)
+  OwKafkaConsumer
+    .bufferedSource(config.kafkaHosts, topic, topic, maximumContainers * 2)
     .map(msg => ActivationMessage.parse(msg.value))
     .filter {
       case Success(_) => true
