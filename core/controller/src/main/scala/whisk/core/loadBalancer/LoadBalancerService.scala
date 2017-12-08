@@ -32,8 +32,13 @@ import akka.actor.ActorRefFactory
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.cluster.Cluster
+import akka.kafka.ConsumerMessage.CommittableOffsetBatch
+import akka.kafka.{ConsumerSettings, Subscriptions}
+import akka.kafka.scaladsl.Consumer
 import akka.util.Timeout
 import akka.pattern.ask
+import org.apache.kafka.clients.consumer.ConsumerConfig
+import org.apache.kafka.common.serialization.{ByteArrayDeserializer, StringDeserializer}
 import whisk.common.Logging
 import whisk.common.LoggingMarkers
 import whisk.common.TransactionId
@@ -55,6 +60,8 @@ import whisk.core.entity.WhiskAction
 import whisk.core.entity.types.EntityStore
 import whisk.spi.SpiLoader
 import pureconfig._
+
+import scala.collection.immutable.Queue
 
 case class LoadbalancerConfig(blackboxFraction: Double, invokerBusyThreshold: Int)
 
@@ -281,6 +288,35 @@ class LoadBalancerService(config: WhiskConfig, instance: InstanceId, entityStore
       activeAckPollDuration,
       processActiveAck)
   })
+
+  val settings = ConsumerSettings(actorSystem, new ByteArrayDeserializer, new StringDeserializer)
+    .withBootstrapServers(config.kafkaHosts)
+    .withGroupId("completions")
+    .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+
+  Consumer
+    .committableSource(settings, Subscriptions.topics(s"completed${instance.toInt}"))
+    .batch(128, Queue(_))(_ :+ _)
+    .mapAsync(4) { msgs =>
+      msgs
+        .foldLeft(CommittableOffsetBatch.empty)((batch, msg) => batch.updated(msg.committableOffset))
+        .commitScaladsl()
+        .map { _ =>
+          msgs.map(_.record.value)
+        }
+    }
+    .mapConcat(identity)
+    .mapAsyncUnordered(16) { msg =>
+      Future {
+        CompletionMessage.parse(msg) match {
+          case Success(m: CompletionMessage) =>
+            processCompletion(m.response, m.transid, forced = false, invoker = m.invoker)
+
+          case Failure(t) =>
+            logging.error(this, s"failed processing message: $raw with $t")
+        }
+      }
+    }
 
   def processActiveAck(bytes: Array[Byte]): Future[Unit] = Future {
     val raw = new String(bytes, StandardCharsets.UTF_8)

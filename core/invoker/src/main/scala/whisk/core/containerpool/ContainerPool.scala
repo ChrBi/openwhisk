@@ -36,6 +36,11 @@ sealed trait WorkerState
 case object Busy extends WorkerState
 case object Free extends WorkerState
 
+object FlowControl {
+  case object Initialize
+  case object Ignore
+}
+
 case class WorkerData(data: ContainerData, state: WorkerState)
 
 /**
@@ -56,13 +61,11 @@ case class WorkerData(data: ContainerData, state: WorkerState)
  * @param childFactory method to create new container proxy actor
  * @param maxActiveContainers maximum amount of containers doing work
  * @param maxPoolSize maximum size of containers allowed in the pool
- * @param feed actor to request more work from
  * @param prewarmConfig optional settings for container prewarming
  */
 class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                     maxActiveContainers: Int,
                     maxPoolSize: Int,
-                    feed: ActorRef,
                     prewarmConfig: Option[PrewarmingConfig] = None)
     extends Actor {
   implicit val logging = new AkkaLogging(context.system.log)
@@ -70,6 +73,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   var freePool = immutable.Map.empty[ActorRef, ContainerData]
   var busyPool = immutable.Map.empty[ActorRef, ContainerData]
   var prewarmedPool = immutable.Map.empty[ActorRef, ContainerData]
+
+  var feed = ActorRef.noSender
 
   prewarmConfig.foreach { config =>
     logging.info(this, s"pre-warming ${config.count} ${config.exec.kind} containers")
@@ -79,6 +84,10 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   }
 
   def receive: Receive = {
+    case FlowControl.Initialize =>
+      feed = sender()
+      (0 to maxActiveContainers).foreach(_ => feed ! MessageFeed.Processed)
+
     // A job to run on a container
     case r: Run =>
       val container = if (busyPool.size < maxActiveContainers) {
@@ -235,9 +244,8 @@ object ContainerPool {
   def props(factory: ActorRefFactory => ActorRef,
             maxActive: Int,
             size: Int,
-            feed: ActorRef,
             prewarmConfig: Option[PrewarmingConfig] = None) =
-    Props(new ContainerPool(factory, maxActive, size, feed, prewarmConfig))
+    Props(new ContainerPool(factory, maxActive, size, prewarmConfig))
 }
 
 /** Contains settings needed to perform container prewarming */
