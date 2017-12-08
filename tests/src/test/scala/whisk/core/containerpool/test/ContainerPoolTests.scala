@@ -42,7 +42,6 @@ import whisk.core.entity._
 import whisk.core.entity.ExecManifest.RuntimeManifest
 import whisk.core.entity.ExecManifest.ImageName
 import whisk.core.entity.size._
-import whisk.core.connector.MessageFeed
 
 /**
  * Behavior tests for the ContainerPool
@@ -122,7 +121,7 @@ class ContainerPoolTests
   it should "reuse a warm container" in within(timeout) {
     val (containers, factory) = testContainers(2)
     val feed = TestProbe()
-    val pool = system.actorOf(ContainerPool.props(factory, 2, 2, feed.ref))
+    val pool = system.actorOf(ContainerPool.props(factory, 2, 2))
 
     pool ! runMessage
     containers(0).expectMsg(runMessage)
@@ -137,7 +136,7 @@ class ContainerPoolTests
     val (containers, factory) = testContainers(2)
     val feed = TestProbe()
 
-    val pool = system.actorOf(ContainerPool.props(factory, 2, 2, feed.ref))
+    val pool = system.actorOf(ContainerPool.props(factory, 2, 2))
     pool ! runMessage
     containers(0).expectMsg(runMessage)
     // Note that the container doesn't respond, thus it's not free to take work
@@ -151,11 +150,11 @@ class ContainerPoolTests
     val feed = TestProbe()
 
     // a pool with only 1 slot
-    val pool = system.actorOf(ContainerPool.props(factory, 1, 1, feed.ref))
+    val pool = system.actorOf(ContainerPool.props(factory, 1, 1))
     pool ! runMessage
     containers(0).expectMsg(runMessage)
     containers(0).send(pool, NeedWork(warmedData()))
-    feed.expectMsg(MessageFeed.Processed)
+    feed.expectMsg(FlowControl.Processed)
     pool ! runMessageDifferentEverything
     containers(0).expectMsg(Remove)
     containers(1).expectMsg(runMessageDifferentEverything)
@@ -166,19 +165,19 @@ class ContainerPoolTests
     val feed = TestProbe()
 
     // a pool with only 1 active slot but 2 slots in total
-    val pool = system.actorOf(ContainerPool.props(factory, 1, 2, feed.ref))
+    val pool = system.actorOf(ContainerPool.props(factory, 1, 2))
 
     // Run the first container
     pool ! runMessage
     containers(0).expectMsg(runMessage)
     containers(0).send(pool, NeedWork(warmedData(lastUsed = Instant.EPOCH)))
-    feed.expectMsg(MessageFeed.Processed)
+    feed.expectMsg(FlowControl.Processed)
 
     // Run the second container, don't remove the first one
     pool ! runMessageDifferentEverything
     containers(1).expectMsg(runMessageDifferentEverything)
     containers(1).send(pool, NeedWork(warmedData(lastUsed = Instant.now)))
-    feed.expectMsg(MessageFeed.Processed)
+    feed.expectMsg(FlowControl.Processed)
     pool ! runMessageDifferentNamespace
     containers(2).expectMsg(runMessageDifferentNamespace)
 
@@ -192,11 +191,11 @@ class ContainerPoolTests
     val feed = TestProbe()
 
     // a pool with only 1 slot
-    val pool = system.actorOf(ContainerPool.props(factory, 1, 1, feed.ref))
+    val pool = system.actorOf(ContainerPool.props(factory, 1, 1))
     pool ! runMessage
     containers(0).expectMsg(runMessage)
     containers(0).send(pool, NeedWork(warmedData()))
-    feed.expectMsg(MessageFeed.Processed)
+    feed.expectMsg(FlowControl.Processed)
     pool ! runMessageDifferentNamespace
     containers(0).expectMsg(Remove)
     containers(1).expectMsg(runMessageDifferentNamespace)
@@ -210,7 +209,7 @@ class ContainerPoolTests
     val feed = TestProbe()
 
     val pool =
-      system.actorOf(ContainerPool.props(factory, 0, 0, feed.ref, Some(PrewarmingConfig(1, exec, memoryLimit))))
+      system.actorOf(ContainerPool.props(factory, 0, 0, Some(PrewarmingConfig(1, exec, memoryLimit))))
     containers(0).expectMsg(Start(exec, memoryLimit))
   }
 
@@ -219,7 +218,7 @@ class ContainerPoolTests
     val feed = TestProbe()
 
     val pool =
-      system.actorOf(ContainerPool.props(factory, 1, 1, feed.ref, Some(PrewarmingConfig(1, exec, memoryLimit))))
+      system.actorOf(ContainerPool.props(factory, 1, 1, Some(PrewarmingConfig(1, exec, memoryLimit))))
     containers(0).expectMsg(Start(exec, memoryLimit))
     containers(0).send(pool, NeedWork(preWarmedData(exec.kind)))
     pool ! runMessage
@@ -232,8 +231,8 @@ class ContainerPoolTests
 
     val alternativeExec = CodeExecAsString(RuntimeManifest("anotherKind", ImageName("testImage")), "testCode", None)
 
-    val pool = system.actorOf(
-      ContainerPool.props(factory, 1, 1, feed.ref, Some(PrewarmingConfig(1, alternativeExec, memoryLimit))))
+    val pool =
+      system.actorOf(ContainerPool.props(factory, 1, 1, Some(PrewarmingConfig(1, alternativeExec, memoryLimit))))
     containers(0).expectMsg(Start(alternativeExec, memoryLimit)) // container0 was prewarmed
     containers(0).send(pool, NeedWork(preWarmedData(alternativeExec.kind)))
     pool ! runMessage
@@ -247,7 +246,7 @@ class ContainerPoolTests
     val alternativeLimit = 128.MB
 
     val pool =
-      system.actorOf(ContainerPool.props(factory, 1, 1, feed.ref, Some(PrewarmingConfig(1, exec, alternativeLimit))))
+      system.actorOf(ContainerPool.props(factory, 1, 1, Some(PrewarmingConfig(1, exec, alternativeLimit))))
     containers(0).expectMsg(Start(exec, alternativeLimit)) // container0 was prewarmed
     containers(0).send(pool, NeedWork(preWarmedData(exec.kind, alternativeLimit)))
     pool ! runMessage
@@ -261,7 +260,7 @@ class ContainerPoolTests
     val (containers, factory) = testContainers(2)
     val feed = TestProbe()
 
-    val pool = system.actorOf(ContainerPool.props(factory, 2, 2, feed.ref))
+    val pool = system.actorOf(ContainerPool.props(factory, 2, 2))
 
     // container0 is created and used
     pool ! runMessage
