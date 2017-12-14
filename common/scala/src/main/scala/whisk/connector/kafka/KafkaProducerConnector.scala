@@ -44,7 +44,6 @@ class KafkaProducerConnector(
   val source =
     Source.queue[(ProducerRecord[String, String], Promise[RecordMetadata])](Int.MaxValue, OverflowStrategy.dropNew)
   val producerSettings = ProducerSettings(actorSystem, new StringSerializer, new StringSerializer)
-    .withBootstrapServers(kafkahosts)
 
   val kafkaProducer: SourceQueueWithComplete[(ProducerRecord[String, String], Promise[RecordMetadata])] = source
     .map {
