@@ -133,7 +133,7 @@ class InvokerReactive(config: WhiskConfig, instance: InstanceId, producer: Messa
       .props(childFactory, maximumContainers, maximumContainers, Some(PrewarmingConfig(2, prewarmExec, 256.MB))))
 
   msgProvider
-    .getConsumer(config.kafkaHosts, topic, topic, maximumContainers * 2)
+    .getConsumer(topic, topic, maximumContainers * 2)
     .map(msg => ActivationMessage.parse(msg))
     .filter {
       case Success(_) => true

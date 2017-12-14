@@ -31,13 +31,13 @@ import scala.collection.immutable.Queue
 
 object OwKafkaConsumer {
 
-  def bufferedSource(kafkaHosts: String, group: String, topic: String, maxBatchSize: Int)(
+  def bufferedSource(group: String, topic: String, maxBatchSize: Int)(
     implicit actorSystem: ActorSystem): Source[String, NotUsed] = {
 
-    batchedSouce(kafkaHosts, group, topic, maxBatchSize).mapConcat(identity)
+    batchedSouce(group, topic, maxBatchSize).mapConcat(identity)
   }
 
-  def batchedSouce(kafkaHosts: String, group: String, topic: String, maxBatchSize: Int)(
+  def batchedSouce(group: String, topic: String, maxBatchSize: Int)(
     implicit actorSystem: ActorSystem): Source[Queue[String], NotUsed] = {
     implicit val ec = actorSystem.dispatcher
     val settings = ConsumerSettings(actorSystem, new ByteArrayDeserializer, new StringDeserializer)

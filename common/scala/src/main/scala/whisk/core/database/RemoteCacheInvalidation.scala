@@ -49,9 +49,9 @@ class RemoteCacheInvalidation(config: WhiskConfig, component: String, instance: 
 
   private val msgProvider = SpiLoader.get[MessagingProvider]
 
-  msgProvider.getConsumer(config.kafkaHosts, s"$topic$instanceId", topic, 128).runForeach(removeFromLocalCache)
+  msgProvider.getConsumer(s"$topic$instanceId", topic, 128).runForeach(removeFromLocalCache)
 
-  private val cacheInvalidationProducer = msgProvider.getProducer(config, ec)
+  private val cacheInvalidationProducer = msgProvider.getProducer()
 
   def notifyOtherInstancesAboutInvalidation(key: CacheKey): Future[Unit] = {
     cacheInvalidationProducer.send(topic, CacheInvalidationMessage(key, instanceId)).map(_ => Unit)

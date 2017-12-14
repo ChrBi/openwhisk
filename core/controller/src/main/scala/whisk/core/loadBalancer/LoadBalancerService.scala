@@ -211,7 +211,7 @@ class LoadBalancerService(config: WhiskConfig, instance: InstanceId, entityStore
 
   /** Gets a producer which can publish messages to the kafka bus. */
   private val messagingProvider = SpiLoader.get[MessagingProvider]
-  private val messageProducer = messagingProvider.getProducer(config, executionContext)
+  private val messageProducer = messagingProvider.getProducer()
 
   private def sendActivationToInvoker(producer: MessageProducer,
                                       msg: ActivationMessage,
@@ -247,7 +247,7 @@ class LoadBalancerService(config: WhiskConfig, instance: InstanceId, entityStore
 
     val maxPingsPerPoll = 128
     val pingConsumer =
-      messagingProvider.getConsumer(config.kafkaHosts, s"health${instance.toInt}", "health", maxPingsPerPoll)
+      messagingProvider.getConsumer(s"health${instance.toInt}", "health", maxPingsPerPoll)
     val invokerFactory = (f: ActorRefFactory, invokerInstance: InstanceId) =>
       f.actorOf(InvokerActor.props(invokerInstance, instance))
 
@@ -262,7 +262,7 @@ class LoadBalancerService(config: WhiskConfig, instance: InstanceId, entityStore
   val maxActiveAcksPerPoll = 128
   val activeAckPollDuration = 1.second
   private val activeAckConsumer =
-    messagingProvider.getConsumer(config.kafkaHosts, "completions", s"completed${instance.toInt}", maxActiveAcksPerPoll)
+    messagingProvider.getConsumer("completions", s"completed${instance.toInt}", maxActiveAcksPerPoll)
 
   activeAckConsumer.runForeach(processActiveAck)
 
@@ -326,8 +326,7 @@ class LoadBalancerService(config: WhiskConfig, instance: InstanceId, entityStore
 
 object LoadBalancerService {
   def requiredProperties =
-    kafkaHosts ++
-      Map(controllerLocalBookkeeping -> null, controllerSeedNodes -> null)
+    Map(controllerLocalBookkeeping -> null, controllerSeedNodes -> null)
 
   /** Memoizes the result of `f` for later use. */
   def memoize[I, O](f: I => O): I => O = new scala.collection.mutable.HashMap[I, O]() {

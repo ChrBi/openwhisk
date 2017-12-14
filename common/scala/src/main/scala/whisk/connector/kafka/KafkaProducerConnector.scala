@@ -26,20 +26,16 @@ import org.apache.kafka.clients.producer.{ProducerRecord, RecordMetadata}
 import org.apache.kafka.common.serialization.StringSerializer
 import whisk.common.{Counter, Logging}
 import whisk.core.connector.{Message, MessageProducer}
-import whisk.core.entity.UUIDs
 
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
-class KafkaProducerConnector(
-  kafkahosts: String,
-  implicit val executionContext: ExecutionContext,
-  id: String = UUIDs.randomUUID().toString)(implicit actorSystem: ActorSystem, logging: Logging)
-    extends MessageProducer {
+class KafkaProducerConnector()(implicit actorSystem: ActorSystem, logging: Logging) extends MessageProducer {
+
+  private implicit val executionContext = actorSystem.dispatchers.lookup("akka.kafka.default-dispatcher")
+  private implicit val materializer = ActorMaterializer()
 
   override def sentCount() = sentCounter.cur
-
-  private implicit val materializer = ActorMaterializer()
 
   val source =
     Source.queue[(ProducerRecord[String, String], Promise[RecordMetadata])](Int.MaxValue, OverflowStrategy.dropNew)
@@ -77,7 +73,4 @@ class KafkaProducerConnector(
   }
 
   private val sentCounter = new Counter()
-
-  // TODO ??
-//    props.put(ProducerConfig.ACKS_CONFIG, 1.toString)
 }
