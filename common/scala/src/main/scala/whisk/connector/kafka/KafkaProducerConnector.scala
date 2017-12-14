@@ -46,14 +46,9 @@ class KafkaProducerConnector(
   val producerSettings = ProducerSettings(actorSystem, new StringSerializer, new StringSerializer)
 
   val kafkaProducer: SourceQueueWithComplete[(ProducerRecord[String, String], Promise[RecordMetadata])] = source
-    .map {
-      case (msg, prom) =>
-        ProducerMessage.Message(msg, prom)
-    }
+    .map { case (msg, prom) => ProducerMessage.Message(msg, prom) }
     .via(Producer.flow(producerSettings))
-    .map { result =>
-      result.message.passThrough.success(result.metadata)
-    }
+    .map(result => result.message.passThrough.success(result.metadata))
     .to(Sink.ignore)
     .run()
 
