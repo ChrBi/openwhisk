@@ -34,7 +34,6 @@ trait MessagingProvider extends Spi {
 
   def getProducer(config: WhiskConfig, ec: ExecutionContext)(implicit actorSystem: ActorSystem,
                                                              logging: Logging): MessageProducer
-                                                             
-  def ensureTopic(config: WhiskConfig, topic: String, topicConfig: String)(
-    implicit logging: Logging): Boolean
+
+  def ensureTopic(config: WhiskConfig, topic: String, topicConfig: String)(implicit logging: Logging): Boolean
 }
