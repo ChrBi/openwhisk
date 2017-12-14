@@ -21,6 +21,7 @@ import java.util.Properties
 import java.util.concurrent.ExecutionException
 
 import akka.actor.ActorSystem
+import akka.stream.UniqueKillSwitch
 import akka.stream.scaladsl.Source
 import org.apache.kafka.clients.admin.{AdminClient, AdminClientConfig, NewTopic}
 import org.apache.kafka.common.errors.TopicExistsException
@@ -46,7 +47,7 @@ case class TopicConfig(segmentBytes: Long, retentionBytes: Long, retentionMs: Lo
  */
 object KafkaMessagingProvider extends MessagingProvider {
   def getConsumer(group: String, topic: String, maxBatchSize: Int)(
-    implicit actorSystem: ActorSystem): Source[String, _] = {
+    implicit actorSystem: ActorSystem): Source[String, UniqueKillSwitch] = {
     OwKafkaConsumer.bufferedSource(group, topic, maxBatchSize)
   }
 

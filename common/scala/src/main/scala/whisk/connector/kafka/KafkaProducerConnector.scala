@@ -18,10 +18,10 @@
 package whisk.connector.kafka
 
 import akka.actor.ActorSystem
-import akka.kafka.scaladsl.Producer
+import akka.kafka.internal.OwKafkaProducer
 import akka.kafka.{ProducerMessage, ProducerSettings}
 import akka.stream.scaladsl.{Sink, Source, SourceQueueWithComplete}
-import akka.stream.{ActorMaterializer, OverflowStrategy}
+import akka.stream.{ActorMaterializer, OverflowStrategy, QueueOfferResult}
 import org.apache.kafka.clients.producer.{ProducerRecord, RecordMetadata}
 import org.apache.kafka.common.serialization.StringSerializer
 import whisk.common.{Counter, Logging}
@@ -43,8 +43,17 @@ class KafkaProducerConnector()(implicit actorSystem: ActorSystem, logging: Loggi
 
   val kafkaProducer: SourceQueueWithComplete[(ProducerRecord[String, String], Promise[RecordMetadata])] = source
     .map { case (msg, prom) => ProducerMessage.Message(msg, prom) }
-    .via(Producer.flow(producerSettings))
+    .map { m =>
+      println(m)
+      m
+    }
+    .via(OwKafkaProducer.flow(producerSettings))
+    .map { m =>
+      println(m)
+      m
+    }
     .map(result => result.message.passThrough.success(result.metadata))
+    .recover { case t => println(t) }
     .to(Sink.ignore)
     .run()
 
@@ -56,7 +65,15 @@ class KafkaProducerConnector()(implicit actorSystem: ActorSystem, logging: Loggi
     logging.debug(this, s"sending to topic '$topic' msg '$msg'")
     val produced = Promise[RecordMetadata]()
 
-    kafkaProducer.offer((record, produced))
+    kafkaProducer
+      .offer((record, produced))
+      .map {
+        case QueueOfferResult.Failure(t) => produced.tryFailure(t)
+        case q                           => println(q)
+      }
+      .recover {
+        case t => produced.tryFailure(t)
+      }
 
     produced.future.andThen {
       case Success(status) =>

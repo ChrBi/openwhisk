@@ -17,46 +17,48 @@
 
 package whisk.connector.kafka
 
-import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.kafka.ConsumerMessage.CommittableOffsetBatch
 import akka.kafka.scaladsl.Consumer
 import akka.kafka.{ConsumerSettings, Subscriptions}
-import akka.stream.scaladsl.{RestartSource, Source}
+import akka.stream.scaladsl.{Keep, RestartSource, Source}
+import akka.stream.{KillSwitches, UniqueKillSwitch}
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.common.serialization.{ByteArrayDeserializer, StringDeserializer}
 
-import scala.concurrent.duration._
 import scala.collection.immutable.Queue
+import scala.concurrent.duration._
 
 object OwKafkaConsumer {
 
   def bufferedSource(group: String, topic: String, maxBatchSize: Int)(
-    implicit actorSystem: ActorSystem): Source[String, NotUsed] = {
+    implicit actorSystem: ActorSystem): Source[String, UniqueKillSwitch] = {
 
     batchedSouce(group, topic, maxBatchSize).mapConcat(identity)
   }
 
   def batchedSouce(group: String, topic: String, maxBatchSize: Int)(
-    implicit actorSystem: ActorSystem): Source[Queue[String], NotUsed] = {
+    implicit actorSystem: ActorSystem): Source[Queue[String], UniqueKillSwitch] = {
     implicit val ec = actorSystem.dispatcher
     val settings = ConsumerSettings(actorSystem, new ByteArrayDeserializer, new StringDeserializer)
       .withGroupId(group)
       .withProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxBatchSize.toString)
 
-    RestartSource.withBackoff(minBackoff = 500.milliseconds, maxBackoff = 30.seconds, randomFactor = 0.1) { () =>
-      Consumer
-        .committableSource(settings, Subscriptions.topics(topic))
-        .batch(maxBatchSize, Queue(_))(_ :+ _)
-        .mapAsync(4) { msgs =>
-          msgs
-            .foldLeft(CommittableOffsetBatch.empty)((batch, msg) => batch.updated(msg.committableOffset))
-            .commitScaladsl()
-            .map { _ =>
-              msgs.map(_.record.value)
-            }
-        }
-    }
+    RestartSource
+      .withBackoff(minBackoff = 500.milliseconds, maxBackoff = 30.seconds, randomFactor = 0.1) { () =>
+        Consumer
+          .committableSource(settings, Subscriptions.topics(topic))
+          .batch(maxBatchSize, Queue(_))(_ :+ _)
+          .mapAsync(4) { msgs =>
+            msgs
+              .foldLeft(CommittableOffsetBatch.empty)((batch, msg) => batch.updated(msg.committableOffset))
+              .commitScaladsl()
+              .map { _ =>
+                msgs.map(_.record.value)
+              }
+          }
+      }
+      .viaMat(KillSwitches.single)(Keep.right)
   }
 
 }

@@ -18,6 +18,7 @@
 package whisk.core.connector
 
 import akka.actor.ActorSystem
+import akka.stream.UniqueKillSwitch
 import akka.stream.scaladsl.Source
 import whisk.common.Logging
 import whisk.spi.Spi
@@ -26,7 +27,8 @@ import whisk.spi.Spi
  * An Spi for providing Messaging implementations.
  */
 trait MessagingProvider extends Spi {
-  def getConsumer(group: String, topic: String, maxBatchSize: Int)(implicit actorSystem: ActorSystem): Source[String, _]
+  def getConsumer(group: String, topic: String, maxBatchSize: Int)(
+    implicit actorSystem: ActorSystem): Source[String, UniqueKillSwitch]
 
   def getProducer()(implicit actorSystem: ActorSystem, logging: Logging): MessageProducer
 
