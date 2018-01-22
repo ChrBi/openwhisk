@@ -17,20 +17,12 @@
 
 package whisk.core.containerpool
 
-import scala.collection.immutable
-import akka.actor.Actor
-import akka.actor.ActorRef
-import akka.actor.ActorRefFactory
-import akka.actor.Props
-import whisk.common.AkkaLogging
-import whisk.common.TransactionId
-import whisk.core.entity.ByteSize
-import whisk.core.entity.CodeExec
-import whisk.core.entity.EntityName
-import whisk.core.entity.ExecutableWhiskAction
+import akka.actor.{Actor, ActorRef, ActorRefFactory, Props}
+import whisk.common.{AkkaLogging, TransactionId}
 import whisk.core.entity.size._
-import whisk.core.connector.MessageFeed
+import whisk.core.entity.{ByteSize, CodeExec, EntityName, ExecutableWhiskAction}
 
+import scala.collection.immutable
 import scala.concurrent.duration._
 
 sealed trait WorkerState
@@ -63,7 +55,6 @@ case class WorkerData(data: ContainerData, state: WorkerState)
 class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                     maxActiveContainers: Int,
                     maxPoolSize: Int,
-                    feed: ActorRef,
                     prewarmConfig: Option[PrewarmingConfig] = None)
     extends Actor {
   implicit val logging = new AkkaLogging(context.system.log)
@@ -137,7 +128,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       freePool = freePool + (sender() -> data)
       busyPool.get(sender()).foreach { _ =>
         busyPool = busyPool - sender()
-        feed ! MessageFeed.Processed
       }
 
     // Container is prewarmed and ready to take work
@@ -149,8 +139,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       freePool = freePool - sender()
       busyPool.get(sender()).foreach { _ =>
         busyPool = busyPool - sender()
-        // container was busy, so there is capacity to accept another job request
-        feed ! MessageFeed.Processed
+      // container was busy, so there is capacity to accept another job request
       }
 
     // This message is received for one of these reasons:
@@ -260,9 +249,8 @@ object ContainerPool {
   def props(factory: ActorRefFactory => ActorRef,
             maxActive: Int,
             size: Int,
-            feed: ActorRef,
             prewarmConfig: Option[PrewarmingConfig] = None) =
-    Props(new ContainerPool(factory, maxActive, size, feed, prewarmConfig))
+    Props(new ContainerPool(factory, maxActive, size, prewarmConfig))
 }
 
 /** Contains settings needed to perform container prewarming */

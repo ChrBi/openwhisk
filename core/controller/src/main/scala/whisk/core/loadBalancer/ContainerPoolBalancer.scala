@@ -21,17 +21,31 @@ import java.nio.charset.StandardCharsets
 
 import akka.actor.{ActorRefFactory, ActorSystem, Props}
 import akka.cluster.Cluster
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
+import akka.http.scaladsl.marshalling.Marshal
+import akka.http.scaladsl.model._
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
-import org.apache.kafka.clients.producer.RecordMetadata
 import pureconfig._
+import spray.json._
 import whisk.common.{Logging, LoggingMarkers, TransactionId}
 import whisk.core.WhiskConfig._
 import whisk.core.connector._
 import whisk.core.database.NoDocumentException
-import whisk.core.entity._
 import whisk.core.entity.types.EntityStore
+import whisk.core.entity.{
+  ActivationId,
+  EntityName,
+  ExecutableWhiskActionMetaData,
+  Identity,
+  InstanceId,
+  UUID,
+  WhiskAction,
+  WhiskActivation,
+  _
+}
 import whisk.core.{ConfigKeys, WhiskConfig}
 import whisk.spi.SpiLoader
 import akka.event.Logging.InfoLevel
@@ -196,7 +210,7 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
 
   private def sendActivationToInvoker(producer: MessageProducer,
                                       msg: ActivationMessage,
-                                      invoker: InstanceId): Future[RecordMetadata] = {
+                                      invoker: InstanceId): Future[Unit] = {
     implicit val transid = msg.transid
 
     val topic = s"invoker${invoker.toInt}"
@@ -206,14 +220,25 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
       s"posting topic '$topic' with activation id '${msg.activationId}'",
       logLevel = InfoLevel)
 
-    producer.send(topic, msg).andThen {
-      case Success(status) =>
-        transid.finished(
-          this,
-          start,
-          s"posted to ${status.topic()}[${status.partition()}][${status.offset()}]",
-          logLevel = InfoLevel)
-      case Failure(e) => transid.failed(this, start, s"error on posting to topic $topic")
+    Marshal(msg.toJson).to[RequestEntity].flatMap { entity =>
+      Http()
+        .singleRequest(
+          HttpRequest(
+            uri = Uri(s"http://${invoker.ip}:${invoker.port}/action"),
+            method = HttpMethods.POST,
+            entity = entity))
+        .flatMap { res =>
+          if (res.status == StatusCodes.Accepted) {
+            Future.successful(())
+          } else {
+            Future.failed(new Exception("Invoker did not accept the activation."))
+          }
+        }
+        .andThen {
+          case Success(_) =>
+            transid.finished(this, start, s"posted to invoker${invoker.toInt}")
+          case Failure(e) => transid.failed(this, start, s"error on posting to invoker${invoker.toInt}")
+        }
     }
   }
   private val invokerPool = {

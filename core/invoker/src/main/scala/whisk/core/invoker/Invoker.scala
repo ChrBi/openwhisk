@@ -180,13 +180,16 @@ object Invoker {
       case e: Exception => abort(s"Failed to initialize reactive invoker: ${e.getMessage}")
     }
 
+    // Start listening on Http-requests before sending the Pings.
+    val port = config.servicePort.toInt
+    BasicHttpService.startService(new InvokerServer(invoker).route, port)(
+      actorSystem,
+      ActorMaterializer.create(actorSystem))
+
     Scheduler.scheduleWaitAtMost(1.seconds)(() => {
       producer.send("health", PingMessage(invokerInstance)).andThen {
         case Failure(t) => logger.error(this, s"failed to ping the controller: $t")
       }
     })
-
-    val port = config.servicePort.toInt
-    BasicHttpService.startService(new InvokerServer().route, port)(actorSystem, ActorMaterializer.create(actorSystem))
   }
 }
