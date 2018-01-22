@@ -62,7 +62,7 @@ trait LoadBalancer {
    *
    * @return a Future[IndexedSeq[InvokerHealth]] representing the health of the pools managed by the loadbalancer.
    */
-  def invokerHealth(): Future[IndexedSeq[InvokerHealth]]
+  def invokerHealth(): Future[IndexedSeq[Option[InvokerHealth]]]
 
   /** Gets the number of in-flight activations for a specific user. */
   def activeActivationsFor(namespace: UUID): Future[Int]

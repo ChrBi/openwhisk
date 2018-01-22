@@ -86,10 +86,10 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
   }
 
   /** An indexed sequence of all invokers in the current system. */
-  override def invokerHealth(): Future[IndexedSeq[InvokerHealth]] = {
+  override def invokerHealth(): Future[IndexedSeq[Option[InvokerHealth]]] = {
     invokerPool
       .ask(GetStatus)(Timeout(5.seconds))
-      .mapTo[IndexedSeq[InvokerHealth]]
+      .mapTo[IndexedSeq[Option[InvokerHealth]]]
   }
 
   override def activeActivationsFor(namespace: UUID) = loadBalancerData.activationCountOn(namespace)
@@ -280,7 +280,7 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
   private def numBlackbox(totalInvokers: Int) = Math.max(1, (totalInvokers.toDouble * blackboxFraction).toInt)
 
   /** Return invokers dedicated to running blackbox actions. */
-  private def blackboxInvokers(invokers: IndexedSeq[InvokerHealth]): IndexedSeq[InvokerHealth] = {
+  private def blackboxInvokers(invokers: IndexedSeq[Option[InvokerHealth]]): IndexedSeq[Option[InvokerHealth]] = {
     val blackboxes = numBlackbox(invokers.size)
     invokers.takeRight(blackboxes)
   }
@@ -289,7 +289,7 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
    * Return (at least one) invokers for running non black-box actions.
    * This set can overlap with the blackbox set if there is only one invoker.
    */
-  private def managedInvokers(invokers: IndexedSeq[InvokerHealth]): IndexedSeq[InvokerHealth] = {
+  private def managedInvokers(invokers: IndexedSeq[Option[InvokerHealth]]): IndexedSeq[Option[InvokerHealth]] = {
     val managed = Math.max(1, invokers.length - numBlackbox(invokers.length))
     invokers.take(managed)
   }
@@ -301,9 +301,9 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
     loadBalancerData.activationCountPerInvoker.flatMap { currentActivations =>
       invokerHealth().flatMap { invokers =>
         val invokersToUse = if (action.exec.pull) blackboxInvokers(invokers) else managedInvokers(invokers)
-        val invokersWithUsage = invokersToUse.view.map {
+        val invokersWithUsage = invokersToUse.view.collect {
           // Using a view defers the comparably expensive lookup to actual access of the element
-          case invoker => (invoker.id, invoker.status, currentActivations.getOrElse(invoker.id.toString, 0))
+          case Some(invoker) => (invoker.id, invoker.status, currentActivations.getOrElse(invoker.id.toString, 0))
         }
 
         ContainerPoolBalancer.schedule(invokersWithUsage, lbConfig.invokerBusyThreshold, hash) match {

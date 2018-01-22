@@ -17,38 +17,33 @@
 
 package whisk.core.controller
 
-import scala.concurrent.Await
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.Future
-import scala.util.{Failure, Success}
 import akka.Done
-import akka.actor.ActorSystem
-import akka.actor.CoordinatedShutdown
+import akka.actor.{ActorSystem, CoordinatedShutdown}
+import akka.event.Logging.InfoLevel
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.model.Uri
 import akka.http.scaladsl.server.Route
 import akka.stream.ActorMaterializer
-import spray.json._
-import spray.json.DefaultJsonProtocol._
 import kamon.Kamon
-import whisk.common.AkkaLogging
-import whisk.common.Logging
-import whisk.common.LoggingMarkers
-import whisk.common.TransactionId
-import whisk.core.WhiskConfig
+import pureconfig.loadConfigOrThrow
+import spray.json.DefaultJsonProtocol._
+import spray.json._
+import whisk.common.{AkkaLogging, Logging, LoggingMarkers, TransactionId}
 import whisk.core.connector.MessagingProvider
-import whisk.core.database.RemoteCacheInvalidation
-import whisk.core.database.CacheChangeNotification
+import whisk.core.containerpool.logging.LogStoreProvider
+import whisk.core.database.{CacheChangeNotification, RemoteCacheInvalidation}
 import whisk.core.entitlement._
-import whisk.core.entity._
 import whisk.core.entity.ActivationId.ActivationIdGenerator
 import whisk.core.entity.ExecManifest.Runtimes
+import whisk.core.entity._
 import whisk.core.loadBalancer.LoadBalancerProvider
-import whisk.http.BasicHttpService
-import whisk.http.BasicRasService
+import whisk.core.{ConfigKeys, WhiskConfig}
+import whisk.http.{BasicHttpService, BasicRasService}
 import whisk.spi.SpiLoader
-import whisk.core.containerpool.logging.LogStoreProvider
-import akka.event.Logging.InfoLevel
+
+import scala.concurrent.duration.DurationInt
+import scala.concurrent.{Await, Future}
+import scala.util.{Failure, Success}
 
 /**
  * The Controller is the service that provides the REST API for OpenWhisk.
@@ -141,8 +136,8 @@ class Controller(val instance: InstanceId,
       complete {
         loadBalancer
           .invokerHealth()
-          .map(_.map {
-            case i => s"invoker${i.id.toInt}" -> i.status.asString
+          .map(_.collect {
+            case Some(i) => s"invoker${i.id.toInt}" -> i.status.asString
           }.toMap.toJson.asJsObject)
       }
     }
@@ -222,10 +217,12 @@ object Controller {
       abort(s"failure during msgProvider.ensureTopic for topic cacheInvalidation")
     }
 
+    val instanceConfig = loadConfigOrThrow[InstanceConfig](ConfigKeys.host)
+
     ExecManifest.initialize(config) match {
       case Success(_) =>
         val controller = new Controller(
-          InstanceId(instance),
+          InstanceId(instance, instanceConfig.ip, instanceConfig.port),
           ExecManifest.runtimesManifest,
           config,
           actorSystem,

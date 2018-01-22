@@ -19,10 +19,12 @@ package whisk.core.entity
 
 import spray.json.DefaultJsonProtocol
 
-case class InstanceId(val instance: Int) {
+case class InstanceConfig(ip: String, port: Int)
+
+case class InstanceId(val instance: Int, ip: String, port: Int) {
   def toInt: Int = instance
 }
 
 object InstanceId extends DefaultJsonProtocol {
-  implicit val serdes = jsonFormat1(InstanceId.apply)
+  implicit val serdes = jsonFormat3(InstanceId.apply)
 }

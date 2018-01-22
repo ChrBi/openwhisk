@@ -144,6 +144,8 @@
         -e JMX_REMOTE='{{ jmx.enabled }}'
         -e COMPONENT_NAME='invoker{{ groups['invokers'].index(inventory_hostname) }}'
         -e PORT='8080'
+        -e CONFIG_whisk_host_ip='{{ ansible_host }}'
+        -e CONFIG_whisk_host_port='{{ invoker.port + groups['invokers'].index(inventory_hostname) }}'
         -e KAFKA_HOSTS='{{ kafka_connect_string }}'
         -e CONFIG_whisk_kafka_replicationFactor='{{ kafka.replicationFactor | default() }}'
         -e CONFIG_whisk_kafka_topics_invoker_retentionBytes='{{ kafka_topics_invoker_retentionBytes | default() }}'
