@@ -20,6 +20,9 @@ package whisk.core.invoker
 import java.time.Instant
 
 import akka.actor.{ActorRefFactory, ActorSystem}
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.marshalling.Marshal
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest, RequestEntity, Uri}
 import akka.stream.ActorMaterializer
 import org.apache.kafka.common.errors.RecordTooLargeException
 import spray.json._
@@ -36,6 +39,8 @@ import whisk.spi.SpiLoader
 
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
+
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 
 class InvokerReactive(config: WhiskConfig, instance: InstanceId, producer: MessageProducer)(
   implicit actorSystem: ActorSystem,
@@ -85,6 +90,20 @@ class InvokerReactive(config: WhiskConfig, instance: InstanceId, producer: Messa
 
     def send(res: Either[ActivationId, WhiskActivation], recovery: Boolean = false) = {
       val msg = CompletionMessage(transid, res, instance)
+
+      if (false) {
+        Marshal(msg.toJson).to[RequestEntity].flatMap { entity =>
+          Http()
+            .singleRequest(
+              HttpRequest(
+                uri = Uri(s"http://${controllerInstance.ip}:${controllerInstance.port}/completed"),
+                method = HttpMethods.POST,
+                entity = entity))
+            .map { response =>
+              logging.info(this, s"received ${response.status}")
+            }
+        }
+      }
 
       producer.send(s"completed${controllerInstance.toInt}", msg).andThen {
         case Success(_) =>
