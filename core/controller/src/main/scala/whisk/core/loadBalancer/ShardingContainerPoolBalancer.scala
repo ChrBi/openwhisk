@@ -73,12 +73,20 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Ins
   private val activations = TrieMap[ActivationId, ActivationEntry]()
   private val activationsPerNamespace = TrieMap[UUID, LongAdder]()
   private val totalActivations = new LongAdder()
+  private val totalBlackboxActivations = new LongAdder()
 
   /** State needed for scheduling. */
   private val schedulingState = ShardingContainerPoolBalancerState()()
 
+  /** Scheduler to emit metrics of system utilization */
   actorSystem.scheduler.schedule(0.seconds, 10.seconds) {
     MetricEmitter.emitHistogramMetric(LOADBALANCER_ACTIVATIONS_INFLIGHT(controllerInstance), totalActivations.longValue)
+  }
+
+  /** Scheduler to update blackbox fraction based on current load */
+  actorSystem.scheduler.schedule(0.seconds, 10.seconds) {
+    val currentBlackboxLoad = totalBlackboxActivations.doubleValue() / totalActivations.doubleValue()
+    schedulingState.updateBlackboxFraction(currentBlackboxLoad)
   }
 
   /**
@@ -162,6 +170,7 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Ins
                               instance: InstanceId): ActivationEntry = {
 
     totalActivations.increment()
+    if (action.exec.pull) totalBlackboxActivations.increment()
     activationsPerNamespace.getOrElseUpdate(msg.user.uuid, new LongAdder()).increment()
 
     val timeout = action.limits.timeout.duration.max(TimeLimit.STD_DURATION) + 1.minute
@@ -181,6 +190,7 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Ins
           msg.user.uuid,
           instance,
           timeoutHandler,
+          action.exec.pull,
           Promise[Either[ActivationId, WhiskActivation]]())
       })
   }
@@ -261,6 +271,7 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Ins
     activations.remove(aid) match {
       case Some(entry) =>
         totalActivations.decrement()
+        if (entry.isBlackBoxAction) totalBlackboxActivations.decrement()
         activationsPerNamespace.get(entry.namespaceId).foreach(_.decrement())
         schedulingState.invokerSlots.lift(invoker.toInt).foreach(_.release())
 
@@ -341,7 +352,7 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
                dispatched: IndexedSeq[ForcableSemaphore],
                index: Int,
                step: Int,
-               stepsDone: Int = 0)(implicit logging: Logging): Option[InstanceId] = {
+               stepsDone: Int = 0)(implicit logging: Logging, tid: TransactionId): Option[InstanceId] = {
     val numInvokers = invokers.size
 
     if (numInvokers > 0) {
@@ -390,14 +401,16 @@ case class ShardingContainerPoolBalancerState(
   private var _managedStepSizes: Seq[Int] = ShardingContainerPoolBalancer.pairwiseCoprimeNumbersUntil(0),
   private var _blackboxStepSizes: Seq[Int] = ShardingContainerPoolBalancer.pairwiseCoprimeNumbersUntil(0),
   private var _invokerSlots: IndexedSeq[ForcableSemaphore] = IndexedSeq.empty[ForcableSemaphore],
-  private var _clusterSize: Int = 1)(
+  private var _clusterSize: Int = 1,
+  private var _blackboxFraction: Double = 0.1)(
   lbConfig: ShardingContainerPoolBalancerConfig =
     loadConfigOrThrow[ShardingContainerPoolBalancerConfig](ConfigKeys.loadbalancer))(implicit logging: Logging) {
 
   private val totalInvokerThreshold = lbConfig.invokerBusyThreshold
   private var currentInvokerThreshold = totalInvokerThreshold
 
-  private val blackboxFraction: Double = Math.max(0.0, Math.min(1.0, lbConfig.blackboxFraction))
+  // Set the start value of the blackbox fraction
+  _blackboxFraction = Math.max(0.0, Math.min(1.0, lbConfig.blackboxFraction))
   logging.info(this, s"blackboxFraction = $blackboxFraction")(TransactionId.loadbalancer)
 
   /** Getters for the variables, setting from the outside is only allowed through the update methods below */
@@ -408,6 +421,12 @@ case class ShardingContainerPoolBalancerState(
   def blackboxStepSizes: Seq[Int] = _blackboxStepSizes
   def invokerSlots: IndexedSeq[ForcableSemaphore] = _invokerSlots
   def clusterSize: Int = _clusterSize
+  def blackboxFraction: Double = _blackboxFraction
+
+  def updateBlackboxFraction(newBlackboxFraction: Double): Unit = {
+    _blackboxFraction = newBlackboxFraction
+    updateInvokers(invokers)
+  }
 
   /**
    * Updates the scheduling state with the new invokers.
@@ -501,4 +520,5 @@ case class ActivationEntry(id: ActivationId,
                            namespaceId: UUID,
                            invokerName: InstanceId,
                            timeoutHandler: Cancellable,
+                           isBlackBoxAction: Boolean,
                            promise: Promise[Either[ActivationId, WhiskActivation]])
