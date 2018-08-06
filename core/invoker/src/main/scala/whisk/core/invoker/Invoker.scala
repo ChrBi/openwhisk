@@ -27,7 +27,7 @@ import whisk.core.WhiskConfig
 import whisk.core.WhiskConfig._
 import whisk.core.connector.{MessagingProvider, PingMessage}
 import whisk.core.entity.{ExecManifest, InvokerInstanceId}
-import whisk.http.{BasicHttpService, BasicRasService}
+import whisk.http.BasicHttpService
 import whisk.spi.SpiLoader
 import whisk.utils.ExecutionContextFactory
 
@@ -35,7 +35,10 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Try}
 
-case class CmdLineArgs(uniqueName: Option[String] = None, id: Option[Int] = None, displayedName: Option[String] = None)
+case class CmdLineArgs(uniqueName: Option[String] = None,
+                       id: Option[Int] = None,
+                       displayedName: Option[String] = None,
+                       ip: String = "")
 
 object Invoker {
 
@@ -111,6 +114,8 @@ object Invoker {
           parse(tail, c.copy(displayedName = nonEmptyString(displayedName)))
         case "--id" :: id :: tail if Try(id.toInt).isSuccess =>
           parse(tail, c.copy(id = Some(id.toInt)))
+        case "--ip" :: ip :: tail =>
+          parse(tail, c.copy(ip = ip))
         case Nil => c
         case _   => abort(s"Error processing command line arguments $ls")
       }
@@ -120,12 +125,12 @@ object Invoker {
 
     val assignedInvokerId = cmdLineArgs match {
       // --id is defined with a valid value, use this id directly.
-      case CmdLineArgs(_, Some(id), _) =>
+      case CmdLineArgs(_, Some(id), _, _) =>
         logger.info(this, s"invokerReg: using proposedInvokerId $id")
         id
 
       // --uniqueName is defined with a valid value, id is empty, assign an id via zookeeper
-      case CmdLineArgs(Some(unique), None, _) =>
+      case CmdLineArgs(Some(unique), None, _, _) =>
         if (config.zookeeperHosts.startsWith(":") || config.zookeeperHosts.endsWith(":")) {
           abort(s"Must provide valid zookeeper host and port to use dynamicId assignment (${config.zookeeperHosts})")
         }
@@ -136,9 +141,12 @@ object Invoker {
 
     initKamon(assignedInvokerId)
 
+    val port = config.servicePort.toInt
+
     val topicBaseName = "invoker"
     val topicName = topicBaseName + assignedInvokerId
-    val invokerInstance = InvokerInstanceId(assignedInvokerId, cmdLineArgs.uniqueName, cmdLineArgs.displayedName)
+    val invokerInstance =
+      InvokerInstanceId(assignedInvokerId, cmdLineArgs.ip, port, cmdLineArgs.uniqueName, cmdLineArgs.displayedName)
     val msgProvider = SpiLoader.get[MessagingProvider]
     if (msgProvider.ensureTopic(config, topic = topicName, topicConfig = topicBaseName).isFailure) {
       abort(s"failure during msgProvider.ensureTopic for topic $topicName")
@@ -150,15 +158,15 @@ object Invoker {
       case e: Exception => abort(s"Failed to initialize reactive invoker: ${e.getMessage}")
     }
 
+    // Start listening on Http-requests before sending the Pings.
+    BasicHttpService.startHttpService(new InvokerServer(invoker).route, port)(
+      actorSystem,
+      ActorMaterializer.create(actorSystem))
+
     Scheduler.scheduleWaitAtMost(1.seconds)(() => {
       producer.send("health", PingMessage(invokerInstance)).andThen {
         case Failure(t) => logger.error(this, s"failed to ping the controller: $t")
       }
     })
-
-    val port = config.servicePort.toInt
-    BasicHttpService.startHttpService(new BasicRasService {}.route, port)(
-      actorSystem,
-      ActorMaterializer.create(actorSystem))
   }
 }

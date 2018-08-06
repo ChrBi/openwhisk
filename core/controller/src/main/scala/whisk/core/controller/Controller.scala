@@ -25,7 +25,7 @@ import akka.Done
 import akka.actor.ActorSystem
 import akka.actor.CoordinatedShutdown
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
-import akka.http.scaladsl.model.Uri
+import akka.http.scaladsl.model.{StatusCodes, Uri}
 import akka.http.scaladsl.server.Route
 import akka.stream.ActorMaterializer
 import spray.json._
@@ -36,7 +36,7 @@ import whisk.common.Logging
 import whisk.common.LoggingMarkers
 import whisk.common.TransactionId
 import whisk.core.WhiskConfig
-import whisk.core.connector.MessagingProvider
+import whisk.core.connector.{CompletionMessage, MessagingProvider}
 import whisk.core.database.{ActivationStoreProvider, CacheChangeNotification, RemoteCacheInvalidation}
 import whisk.core.entitlement._
 import whisk.core.entity._
@@ -98,7 +98,7 @@ class Controller(val instance: ControllerInstanceId,
       (pathEndOrSingleSlash & get) {
         complete(info)
       }
-    } ~ apiV1.routes ~ swagger.swaggerRoutes ~ internalInvokerHealth
+    } ~ apiV1.routes ~ swagger.swaggerRoutes ~ internalInvokerHealth ~ internalLoadbalancerRoutes
   }
 
   // initialize datastores
@@ -153,6 +153,16 @@ class Controller(val instance: ControllerInstanceId,
             .invokerHealth()
             .map(_.count(_.status == InvokerState.Healthy).toJson)
         }
+      }
+    }
+  }
+
+  private val internalLoadbalancerRoutes = {
+    implicit val executionContext = actorSystem.dispatcher
+    (pathPrefix("completed") & post) {
+      entity(as[CompletionMessage]) { m =>
+        loadBalancer.processCompletion(m.response, m.transid, forced = false, invoker = m.invoker)
+        complete(StatusCodes.Accepted)
       }
     }
   }
@@ -227,7 +237,7 @@ object Controller {
 
     // if deploying multiple instances (scale out), must pass the instance number as the
     require(args.length >= 1, "controller instance required")
-    val instance = ControllerInstanceId(args(0))
+    val instance = ControllerInstanceId(args(0), args(1), args(2).toInt)
 
     def abort(message: String) = {
       logger.error(this, message)

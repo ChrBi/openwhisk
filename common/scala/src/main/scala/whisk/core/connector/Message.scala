@@ -106,7 +106,7 @@ object CompletionMessage extends DefaultJsonProtocol {
     }
 
   def parse(msg: String): Try[CompletionMessage] = Try(serdes.read(msg.parseJson))
-  private val serdes = jsonFormat3(CompletionMessage.apply)
+  implicit val serdes = jsonFormat3(CompletionMessage.apply)
 }
 
 case class PingMessage(instance: InvokerInstanceId) extends Message {

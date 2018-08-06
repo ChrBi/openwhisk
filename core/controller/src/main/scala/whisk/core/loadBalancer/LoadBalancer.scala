@@ -74,6 +74,11 @@ trait LoadBalancer {
 
   /** Gets the size of the cluster all loadbalancers are acting in */
   def clusterSize: Int = 1
+
+  def processCompletion(response: Either[ActivationId, WhiskActivation],
+                        tid: TransactionId,
+                        forced: Boolean,
+                        invoker: InvokerInstanceId): Unit
 }
 
 /**

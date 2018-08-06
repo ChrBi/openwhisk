@@ -17,13 +17,12 @@
 
 package whisk.core.containerpool
 
-import scala.collection.immutable
-import whisk.common.{AkkaLogging, LoggingMarkers, TransactionId}
 import akka.actor.{Actor, ActorRef, ActorRefFactory, Props}
+import whisk.common.{AkkaLogging, LoggingMarkers, TransactionId}
 import whisk.core.entity._
 import whisk.core.entity.size._
-import whisk.core.connector.MessageFeed
 
+import scala.collection.immutable
 import scala.concurrent.duration._
 
 sealed trait WorkerState
@@ -53,7 +52,6 @@ case class WorkerData(data: ContainerData, state: WorkerState)
  * @param poolConfig config for the ContainerPool
  */
 class ContainerPool(childFactory: ActorRefFactory => ActorRef,
-                    feed: ActorRef,
                     prewarmConfig: List[PrewarmingConfig] = List.empty,
                     poolConfig: ContainerPoolConfig)
     extends Actor {
@@ -154,7 +152,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       freePool = freePool + (sender() -> data)
       busyPool.get(sender()).foreach { _ =>
         busyPool = busyPool - sender()
-        feed ! MessageFeed.Processed
       }
 
     // Container is prewarmed and ready to take work
@@ -166,8 +163,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       freePool = freePool - sender()
       busyPool.get(sender()).foreach { _ =>
         busyPool = busyPool - sender()
-        // container was busy, so there is capacity to accept another job request
-        feed ! MessageFeed.Processed
+      // container was busy, so there is capacity to accept another job request
       }
 
     // This message is received for one of these reasons:
@@ -275,9 +271,8 @@ object ContainerPool {
 
   def props(factory: ActorRefFactory => ActorRef,
             poolConfig: ContainerPoolConfig,
-            feed: ActorRef,
             prewarmConfig: List[PrewarmingConfig] = List.empty) =
-    Props(new ContainerPool(factory, feed, prewarmConfig, poolConfig))
+    Props(new ContainerPool(factory, prewarmConfig, poolConfig))
 }
 
 /** Contains settings needed to perform container prewarming. */

@@ -63,8 +63,7 @@ trait WhiskTriggersApi extends WhiskCollectionAPI {
     val sslConfig = AkkaSSLConfig().mapSettings { s =>
       s.withLoose(s.loose.withDisableHostnameVerification(true))
     }
-    Https.connectionContext(whiskConfig, Some(sslConfig))
-
+    Https.connectionContext(Some(sslConfig))
   }
 
   protected val controllerProtocol = loadConfigOrThrow[String]("whisk.controller.protocol")

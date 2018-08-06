@@ -25,26 +25,26 @@
 # from there; this permits a (private) registry to be used for caching the images. The registry if specified
 # must include a trailing '/'.
 #
-- name: "pull runtime action images per manifest"
-  shell: "docker pull {{runtimes_registry | default()}}{{item.prefix}}/{{item.name}}:{{item.tag | default()}}"
-  loop: "{{ runtimesManifest.runtimes.values() | sum(start=[]) | selectattr('deprecated', 'equalto',false)  | map(attribute='image') | list | unique }}"
-  when: skip_pull_runtimes is not defined or not (skip_pull_runtimes == True or skip_pull_runtimes.lower() == "true")
-  register: result
-  until: (result.rc == 0)
-  retries: "{{ docker.pull.retries }}"
-  delay: "{{ docker.pull.delay }}"
+#- name: "pull runtime action images per manifest"
+#  shell: "docker pull {{runtimes_registry | default()}}{{item.prefix}}/{{item.name}}:{{item.tag | default()}}"
+#  loop: "{{ runtimesManifest.runtimes.values() | sum(start=[]) | selectattr('deprecated', 'equalto',false)  | map(attribute='image') | list | unique }}"
+#  when: skip_pull_runtimes is not defined or not (skip_pull_runtimes == True or skip_pull_runtimes.lower() == "true")
+#  register: result
+#  until: (result.rc == 0)
+#  retries: "{{ docker.pull.retries }}"
+#  delay: "{{ docker.pull.delay }}"
 
 ###
 # See comment above for pulling other runtime images.
 #
-- name: "pull blackboxes action images per manifest"
-  shell: "docker pull {{runtimes_registry | default()}}{{item.prefix}}/{{item.name}}:{{item.tag | default()}}"
-  loop: "{{ runtimesManifest.blackboxes }}"
-  when: skip_pull_runtimes is not defined or not (skip_pull_runtimes == True or skip_pull_runtimes.lower() == "true")
-  register: result
-  until: (result.rc == 0)
-  retries: "{{ docker.pull.retries }}"
-  delay: "{{ docker.pull.delay }}"
+#- name: "pull blackboxes action images per manifest"
+#  shell: "docker pull {{runtimes_registry | default()}}{{item.prefix}}/{{item.name}}:{{item.tag | default()}}"
+#  loop: "{{ runtimesManifest.blackboxes }}"
+#  when: skip_pull_runtimes is not defined or not (skip_pull_runtimes == True or skip_pull_runtimes.lower() == "true")
+#  register: result
+#  until: (result.rc == 0)
+#  retries: "{{ docker.pull.retries }}"
+#  delay: "{{ docker.pull.delay }}"
 
 - name: "determine docker root dir on docker-machine"
   uri:  url="http://{{ ansible_host }}:{{ docker.port }}/info" return_content=yes
@@ -85,6 +85,14 @@
   copy:
     src: "{{ openwhisk_home }}/ansible/roles/kafka/files/{{ kafka.ssl.keystore.name }}"
     dest: "{{ invoker.confdir }}/{{ invoker_name }}"
+
+- name: copy controller certificate keystore
+  when: controller.protocol == 'https'
+  copy:
+    src: "{{ openwhisk_home }}/ansible/roles/controller/files/{{ controllerKeystoreName }}"
+    mode: 0666
+    dest: "{{ invoker.confdir }}/{{ invoker_name }}"
+  become: "{{ invoker.dir.become }}"
 
 - name: check, that required databases exist
   include_tasks: "{{ openwhisk_home }}/ansible/tasks/db/checkDb.yml"
@@ -223,6 +231,21 @@
       "CONFIG_whisk_timeLimit_std": "{{ limit_action_time_std | default() }}"
       "CONFIG_whisk_activation_payload_max": "{{ limit_activation_payload | default() }}"
       "CONFIG_whisk_transactions_header": "{{ transactions.header }}"
+      "CONFIG_whisk_controller_protocol": "{{ controller.protocol }}"
+      "CONFIG_whisk_controller_https_keystorePath":
+        "{{ controller.ssl.keystore.path }}"
+      "CONFIG_whisk_controller_https_keystorePassword":
+        "{{ controller.ssl.keystore.password }}"
+      "CONFIG_whisk_controller_https_keystoreFlavor":
+        "{{ controller.ssl.storeFlavor }}"
+      "CONFIG_whisk_controller_https_truststorePath":
+        "{{ controller.ssl.truststore.path }}"
+      "CONFIG_whisk_controller_https_truststorePassword":
+        "{{ controller.ssl.truststore.password }}"
+      "CONFIG_whisk_controller_https_truststoreFlavor":
+        "{{ controller.ssl.storeFlavor }}"
+      "CONFIG_whisk_controller_https_clientAuth":
+        "{{ controller.ssl.clientAuth }}"
 
 - name: extend invoker dns env
   set_fact:
@@ -285,7 +308,7 @@
     env: "{{ env }}"
     volumes: "{{ volumes }}"
     ports: "{{ ports_to_expose }}"
-    command: /bin/sh -c "exec /init.sh --id {{ invoker_index }} --uniqueName {{ invoker_index }} >> /logs/{{ invoker_name }}_logs.log 2>&1"
+    command: /bin/sh -c "exec /init.sh --id {{ invoker_index }} --uniqueName {{ invoker_index }} --ip {{ ansible_host }} >> /logs/{{ invoker_name }}_logs.log 2>&1"
 
 - name: wait until Invoker is up and running
   uri:

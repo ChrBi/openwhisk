@@ -170,7 +170,7 @@ object BasicHttpService {
 
     implicit val executionContext = actorSystem.dispatcher
 
-    val httpsBinding = Http().bindAndHandle(route, "0.0.0.0", port, connectionContext = Https.connectionContext(config))
+    val httpsBinding = Http().bindAndHandle(route, "0.0.0.0", port, connectionContext = Https.connectionContext())
     addShutdownHook(httpsBinding)
   }
 

@@ -24,7 +24,6 @@ import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
 import akka.http.scaladsl.ConnectionContext
 import akka.stream.TLSClientAuth
 import com.typesafe.sslconfig.akka.AkkaSSLConfig
-import whisk.core.WhiskConfig
 import pureconfig._
 
 object Https {
@@ -45,7 +44,7 @@ object Https {
     cs
   }
 
-  def connectionContext(config: WhiskConfig, sslConfig: Option[AkkaSSLConfig] = None) = {
+  def connectionContext(sslConfig: Option[AkkaSSLConfig] = None) = {
 
     val keyFactoryType = "SunX509"
     val clientAuth = {

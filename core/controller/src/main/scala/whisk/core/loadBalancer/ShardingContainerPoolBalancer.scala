@@ -25,11 +25,15 @@ import akka.actor.{Actor, ActorSystem, Cancellable, Props}
 import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member, MemberStatus}
 import akka.event.Logging.InfoLevel
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
+import akka.http.scaladsl.marshalling.Marshal
+import akka.http.scaladsl.model.{RequestEntity, _}
 import akka.management.AkkaManagement
 import akka.management.cluster.bootstrap.ClusterBootstrap
 import akka.stream.ActorMaterializer
-import org.apache.kafka.clients.producer.RecordMetadata
 import pureconfig._
+import spray.json._
 import whisk.common.LoggingMarkers._
 import whisk.common._
 import whisk.core.WhiskConfig._
@@ -299,7 +303,7 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   /** 3. Send the activation to the invoker */
   private def sendActivationToInvoker(producer: MessageProducer,
                                       msg: ActivationMessage,
-                                      invoker: InvokerInstanceId): Future[RecordMetadata] = {
+                                      invoker: InvokerInstanceId): Future[Unit] = {
     implicit val transid: TransactionId = msg.transid
 
     val topic = s"invoker${invoker.toInt}"
@@ -311,14 +315,25 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
       s"posting to '$invoker' with activation id '${msg.activationId}'",
       logLevel = InfoLevel)
 
-    producer.send(topic, msg).andThen {
-      case Success(status) =>
-        transid.finished(
-          this,
-          start,
-          s"posted to ${status.topic()}[${status.partition()}][${status.offset()}]",
-          logLevel = InfoLevel)
-      case Failure(_) => transid.failed(this, start, s"error on posting to topic $topic")
+    Marshal(msg.toJson).to[RequestEntity].flatMap { entity =>
+      Http()
+        .singleRequest(
+          HttpRequest(
+            method = HttpMethods.POST,
+            uri = Uri(s"http://${invoker.ip}:${invoker.port}/action"),
+            entity = entity))
+        .flatMap { res =>
+          if (res.status == StatusCodes.Accepted) {
+            Future.successful(())
+          } else {
+            Future.failed(new Exception("Invoker did not accept the activation."))
+          }
+        }
+        .andThen {
+          case Success(_) =>
+            transid.finished(this, start, s"posted to invoker${invoker.toInt}")
+          case Failure(e) => transid.failed(this, start, s"error on posting to invoker${invoker.toInt}")
+        }
     }
   }
 
@@ -331,7 +346,6 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   private val activeAckPollDuration = 1.second
   private val activeAckConsumer =
     messagingProvider.getConsumer(config, activeAckTopic, activeAckTopic, maxPeek = maxActiveAcksPerPoll)
-
   private val activationFeed = actorSystem.actorOf(Props {
     new MessageFeed(
       "activeack",
@@ -349,7 +363,6 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
       case Success(m: CompletionMessage) =>
         processCompletion(m.response, m.transid, forced = false, invoker = m.invoker)
         activationFeed ! MessageFeed.Processed
-
       case Failure(t) =>
         activationFeed ! MessageFeed.Processed
         logging.error(this, s"failed processing message: $raw with $t")
@@ -357,10 +370,10 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   }
 
   /** 5. Process the active-ack and update the state accordingly */
-  private def processCompletion(response: Either[ActivationId, WhiskActivation],
-                                tid: TransactionId,
-                                forced: Boolean,
-                                invoker: InvokerInstanceId): Unit = {
+  def processCompletion(response: Either[ActivationId, WhiskActivation],
+                        tid: TransactionId,
+                        forced: Boolean,
+                        invoker: InvokerInstanceId): Unit = {
     val aid = response.fold(l => l, r => r.activationId)
 
     val invocationResult = if (forced) {

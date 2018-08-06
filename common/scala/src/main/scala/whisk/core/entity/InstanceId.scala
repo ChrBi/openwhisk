@@ -29,6 +29,8 @@ import whisk.core.entity.ControllerInstanceId.MAX_NAME_LENGTH
  * @param displayedName an identifier that is required for the health protocol to correlate Kafka topics with invoker container names
  */
 case class InvokerInstanceId(val instance: Int,
+                             ip: String,
+                             port: Int,
                              uniqueName: Option[String] = None,
                              displayedName: Option[String] = None) {
   def toInt: Int = instance
@@ -36,14 +38,14 @@ case class InvokerInstanceId(val instance: Int,
   override def toString: String = (Seq("invoker" + instance) ++ uniqueName ++ displayedName).mkString("/")
 }
 
-case class ControllerInstanceId(val asString: String) {
+case class ControllerInstanceId(val asString: String, ip: String, port: Int) {
   require(
     asString.length <= MAX_NAME_LENGTH && asString.matches(LEGAL_CHARS),
     "Controller instance id contains invalid characters")
 }
 
 object InvokerInstanceId extends DefaultJsonProtocol {
-  implicit val serdes = jsonFormat3(InvokerInstanceId.apply)
+  implicit val serdes = jsonFormat5(InvokerInstanceId.apply)
 }
 
 object ControllerInstanceId extends DefaultJsonProtocol {
@@ -54,5 +56,5 @@ object ControllerInstanceId extends DefaultJsonProtocol {
   // reserve some number of characters as the prefix to be added to topic names
   private val MAX_NAME_LENGTH = 249 - 121
 
-  implicit val serdes = jsonFormat1(ControllerInstanceId.apply)
+  implicit val serdes = jsonFormat3(ControllerInstanceId.apply)
 }
