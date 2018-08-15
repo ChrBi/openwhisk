@@ -29,7 +29,7 @@ import whisk.core.WhiskConfig
 import whisk.core.WhiskConfig._
 import whisk.core.connector.{MessagingProvider, PingMessage}
 import whisk.core.entity.{ExecManifest, InvokerInstanceId}
-import whisk.http.{BasicHttpService, BasicRasService}
+import whisk.http.BasicHttpService
 import whisk.spi.SpiLoader
 import whisk.utils.ExecutionContextFactory
 
@@ -175,7 +175,7 @@ object Invoker {
     val httpsConfig =
       if (Invoker.protocol == "https") Some(loadConfigOrThrow[HttpsConfig]("whisk.invoker.https")) else None
 
-    BasicHttpService.startHttpService(new BasicRasService {}.route, port, httpsConfig)(
+    BasicHttpService.startHttpService(new InvokerServer(invoker).route, port, httpsConfig)(
       actorSystem,
       ActorMaterializer.create(actorSystem))
 

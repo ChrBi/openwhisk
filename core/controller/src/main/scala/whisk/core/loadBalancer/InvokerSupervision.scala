@@ -99,7 +99,7 @@ final case class InvokerInfo(buffer: RingBuffer[InvocationFinishedResult])
  * by the InvokerPool and thus might not be caught by monitoring.
  */
 class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef,
-                  sendActivationToInvoker: (ActivationMessage, InvokerInstanceId) => Future[RecordMetadata],
+                  sendActivationToInvoker: (ActivationMessage, InvokerInstanceId) => Future[Unit],
                   pingConsumer: MessageConsumer,
                   monitor: Option[ActorRef])
     extends Actor {
@@ -250,7 +250,7 @@ object InvokerPool {
   }
 
   def props(f: (ActorRefFactory, InvokerInstanceId) => ActorRef,
-            p: (ActivationMessage, InvokerInstanceId) => Future[RecordMetadata],
+            p: (ActivationMessage, InvokerInstanceId) => Future[Unit],
             pc: MessageConsumer,
             m: Option[ActorRef] = None): Props = {
     Props(new InvokerPool(f, p, pc, m))

@@ -25,15 +25,21 @@ import akka.actor.{Actor, ActorSystem, Cancellable, Props}
 import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member, MemberStatus}
 import akka.event.Logging.InfoLevel
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
+import akka.http.scaladsl.marshalling.Marshal
+import akka.http.scaladsl.model._
+import akka.http.scaladsl.{Http, HttpsConnectionContext}
 import akka.management.AkkaManagement
 import akka.management.cluster.bootstrap.ClusterBootstrap
 import akka.stream.ActorMaterializer
-import org.apache.kafka.clients.producer.RecordMetadata
+import com.typesafe.sslconfig.akka.AkkaSSLConfig
 import pureconfig._
+import spray.json._
+import whisk.common.Https.HttpsConfig
 import whisk.common.LoggingMarkers._
 import whisk.common._
 import whisk.core.WhiskConfig._
-import whisk.core.connector._
+import whisk.core.connector.{MessageProducer, _}
 import whisk.core.entity._
 import whisk.core.entity.size._
 import whisk.core.{ConfigKeys, WhiskConfig}
@@ -301,29 +307,92 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   private val messagingProvider = SpiLoader.get[MessagingProvider]
   private val messageProducer = messagingProvider.getProducer(config)
 
+  /** Connection context for HTTPS */
+  private lazy val httpsConnectionContext = {
+    val sslConfig = AkkaSSLConfig().mapSettings { s =>
+      s.withLoose(s.loose.withDisableHostnameVerification(true))
+    }
+    val httpsConfig = loadConfigOrThrow[HttpsConfig]("whisk.invoker.https")
+    Https.connectionContext(httpsConfig, Some(sslConfig))
+  }
+
+  def connectionContext(protocol: String): HttpsConnectionContext = {
+    if (protocol == "https") {
+      httpsConnectionContext
+    } else {
+      Http().defaultClientHttpsContext
+    }
+  }
+
   /** 3. Send the activation to the invoker */
-  private def sendActivationToInvoker(producer: MessageProducer,
-                                      msg: ActivationMessage,
-                                      invoker: InvokerInstanceId): Future[RecordMetadata] = {
-    implicit val transid: TransactionId = msg.transid
+  private def sendActivationWithKafka(producer: MessageProducer, msg: ActivationMessage, invoker: InvokerInstanceId)(
+    implicit tid: TransactionId): Future[Unit] = {
 
-    val topic = s"invoker${invoker.toInt}"
-
-    MetricEmitter.emitCounterMetric(LoggingMarkers.LOADBALANCER_ACTIVATION_START)
-    val start = transid.started(
+    val start = tid.started(
       this,
       LoggingMarkers.CONTROLLER_KAFKA,
       s"posting to '$invoker' with activation id '${msg.activationId}'",
       logLevel = InfoLevel)
 
-    producer.send(topic, msg).andThen {
-      case Success(status) =>
-        transid.finished(
-          this,
-          start,
-          s"posted to ${status.topic()}[${status.partition()}][${status.offset()}]",
-          logLevel = InfoLevel)
-      case Failure(_) => transid.failed(this, start, s"error on posting to topic $topic")
+    val topic = s"invoker${invoker.toInt}"
+    producer
+      .send(topic, msg)
+      .andThen {
+        case Success(status) =>
+          tid.finished(
+            this,
+            start,
+            s"posted to ${status.topic()}[${status.partition()}][${status.offset()}]",
+            logLevel = InfoLevel)
+        case Failure(_) => tid.failed(this, start, s"error on posting to topic $topic")
+      }
+      .map(_ => ())
+  }
+
+  private def sendActivationWithHttp(msg: ActivationMessage, invoker: InvokerInstanceId)(
+    implicit tid: TransactionId): Future[Unit] = {
+
+    // TODO
+    val start = tid.started(
+      this,
+      LoggingMarkers.CONTROLLER_KAFKA,
+      s"posting to '$invoker' with activation id '${msg.activationId}'",
+      logLevel = InfoLevel)
+
+    Marshal(msg.toJson).to[RequestEntity].flatMap { entity =>
+      Http()
+        .singleRequest(
+          HttpRequest(
+            method = HttpMethods.POST,
+            uri = Uri(s"${invoker.protocol}://${invoker.host}:${invoker.port}/action"),
+            entity = entity),
+          connectionContext = connectionContext(invoker.protocol))
+        .flatMap { res =>
+          if (res.status == StatusCodes.Accepted) {
+            Future.successful(())
+          } else {
+            Future.failed(new Exception("Invoker did not accept the activation."))
+          }
+        }
+        .andThen {
+          case Success(_) =>
+            tid.finished(this, start, s"posted to invoker${invoker.toInt}")
+          case Failure(e) => tid.failed(this, start, s"error on posting to invoker${invoker.toInt}")
+        }
+    }
+  }
+
+  private def sendActivationToInvoker(producer: MessageProducer,
+                                      msg: ActivationMessage,
+                                      invoker: InvokerInstanceId): Future[Unit] = {
+    implicit val transid: TransactionId = msg.transid
+
+    MetricEmitter.emitCounterMetric(LoggingMarkers.LOADBALANCER_ACTIVATION_START)
+
+    if (!lbConfig.useHttp) {
+      sendActivationWithKafka(producer, msg, invoker)
+    } else {
+      sendActivationWithHttp(msg, invoker)
     }
   }
 
@@ -630,7 +699,8 @@ case class ClusterConfig(useClusterBootstrap: Boolean)
  */
 case class ShardingContainerPoolBalancerConfig(blackboxFraction: Double,
                                                invokerUserMemory: ByteSize,
-                                               timeoutFactor: Int)
+                                               timeoutFactor: Int,
+                                               useHttp: Boolean)
 
 /**
  * State kept for each activation until completion.

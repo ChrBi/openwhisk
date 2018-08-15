@@ -17,51 +17,30 @@
 
 package whisk.core.loadBalancer.test
 
-import scala.collection.mutable
-import scala.concurrent.Await
-import scala.concurrent.duration._
-import scala.concurrent.Future
-import org.apache.kafka.clients.producer.RecordMetadata
-import org.apache.kafka.common.TopicPartition
-import org.junit.runner.RunWith
-import org.scalamock.scalatest.MockFactory
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.FlatSpecLike
-import org.scalatest.Matchers
-import org.scalatest.junit.JUnitRunner
-import akka.actor.ActorRef
-import akka.actor.ActorRefFactory
-import akka.actor.ActorSystem
-import akka.actor.FSM
-import akka.actor.FSM.CurrentState
-import akka.actor.FSM.SubscribeTransitionCallBack
-import akka.actor.FSM.Transition
+import akka.actor.{ActorRef, ActorRefFactory, ActorSystem, FSM}
+import akka.actor.FSM.{CurrentState, SubscribeTransitionCallBack, Transition}
 import akka.pattern.ask
-import akka.testkit.ImplicitSender
-import akka.testkit.TestFSMRef
-import akka.testkit.TestKit
-import akka.testkit.TestProbe
+import akka.testkit.{ImplicitSender, TestFSMRef, TestKit, TestProbe}
 import akka.util.Timeout
 import common.{LoggedFunction, StreamLogging}
+import org.junit.runner.RunWith
+import org.scalamock.scalatest.MockFactory
+import org.scalatest.{BeforeAndAfterAll, FlatSpecLike, Matchers}
+import org.scalatest.junit.JUnitRunner
 import whisk.common.TransactionId
 import whisk.core.WhiskConfig
-import whisk.core.connector.ActivationMessage
-import whisk.core.connector.PingMessage
-import whisk.core.entity.ActivationId.ActivationIdGenerator
-import whisk.core.entity._
-import whisk.core.loadBalancer.ActivationRequest
-import whisk.core.loadBalancer.GetStatus
-import whisk.core.loadBalancer.InvokerState._
-import whisk.core.loadBalancer.InvocationFinishedResult
-import whisk.core.loadBalancer.InvocationFinishedMessage
-import whisk.core.loadBalancer.InvokerActor
-import whisk.core.loadBalancer.InvokerPool
-import whisk.core.loadBalancer.InvokerState
-import whisk.core.loadBalancer.InvokerHealth
-import whisk.utils.retry
+import whisk.core.connector.{ActivationMessage, PingMessage}
 import whisk.core.connector.test.TestConnector
 import whisk.core.entitlement.Privilege
-import whisk.core.entity.ControllerInstanceId
+import whisk.core.entity.ActivationId.ActivationIdGenerator
+import whisk.core.entity.{ControllerInstanceId, _}
+import whisk.core.loadBalancer._
+import whisk.core.loadBalancer.InvokerState._
+import whisk.utils.retry
+
+import scala.collection.mutable
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration._
 
 @RunWith(classOf[JUnitRunner])
 class InvokerSupervisionTests
@@ -109,7 +88,7 @@ class InvokerSupervisionTests
     val children = mutable.Queue(invoker5.ref, invoker2.ref)
     val childFactory = (f: ActorRefFactory, instance: InvokerInstanceId) => children.dequeue()
 
-    val sendActivationToInvoker = stubFunction[ActivationMessage, InvokerInstanceId, Future[RecordMetadata]]
+    val sendActivationToInvoker = stubFunction[ActivationMessage, InvokerInstanceId, Future[Unit]]
     val supervisor = system.actorOf(InvokerPool.props(childFactory, sendActivationToInvoker, pC))
 
     within(timeout.duration) {
@@ -148,7 +127,7 @@ class InvokerSupervisionTests
     val invokerInstance = InvokerInstanceId(0, "", 0)
     val invokerName = s"invoker${invokerInstance.toInt}"
     val childFactory = (f: ActorRefFactory, instance: InvokerInstanceId) => invoker.ref
-    val sendActivationToInvoker = stubFunction[ActivationMessage, InvokerInstanceId, Future[RecordMetadata]]
+    val sendActivationToInvoker = stubFunction[ActivationMessage, InvokerInstanceId, Future[Unit]]
 
     val supervisor = system.actorOf(InvokerPool.props(childFactory, sendActivationToInvoker, pC))
 
@@ -175,7 +154,7 @@ class InvokerSupervisionTests
     val childFactory = (f: ActorRefFactory, instance: InvokerInstanceId) => invoker.ref
 
     val sendActivationToInvoker = LoggedFunction { (a: ActivationMessage, b: InvokerInstanceId) =>
-      Future.successful(new RecordMetadata(new TopicPartition(invokerName, 0), 0L, 0L, 0L, Long.box(0L), 0, 0))
+      Future.successful(())
     }
 
     val supervisor = system.actorOf(InvokerPool.props(childFactory, sendActivationToInvoker, pC))

@@ -44,7 +44,7 @@ class ShardingContainerPoolBalancerTests extends FlatSpec with Matchers with Str
     IndexedSeq.fill(count)(new ForcibleSemaphore(max))
 
   def lbConfig(blackboxFraction: Double, invokerBusyThreshold: ByteSize) =
-    ShardingContainerPoolBalancerConfig(blackboxFraction, invokerBusyThreshold, 1)
+    ShardingContainerPoolBalancerConfig(blackboxFraction, invokerBusyThreshold, 1, true)
 
   it should "update invoker's state, growing the slots data and keeping valid old data" in {
     // start empty

@@ -17,15 +17,14 @@
 
 package whisk.core.invoker
 
+import spray.json.DefaultJsonProtocol._
 import whisk.common.TransactionId
 import whisk.core.database.StaleParameter
-import whisk.core.entity.{Identity, View}
 import whisk.core.entity.types.AuthStore
-
-import scala.concurrent.{ExecutionContext, Future}
-import spray.json.DefaultJsonProtocol._
+import whisk.core.entity.{Identity, View}
 
 import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{ExecutionContext, Future}
 
 /**
  * The namespace blacklist gets all namespaces that are throttled to 0 or blocked from the database.
