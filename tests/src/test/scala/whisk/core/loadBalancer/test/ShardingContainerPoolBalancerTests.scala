@@ -36,9 +36,9 @@ import whisk.core.loadBalancer._
 class ShardingContainerPoolBalancerTests extends FlatSpec with Matchers with StreamLogging {
   behavior of "ShardingContainerPoolBalancerState"
 
-  def healthy(i: Int) = new InvokerHealth(InvokerInstanceId(i), Healthy)
-  def unhealthy(i: Int) = new InvokerHealth(InvokerInstanceId(i), Unhealthy)
-  def offline(i: Int) = new InvokerHealth(InvokerInstanceId(i), Offline)
+  def healthy(i: Int) = new InvokerHealth(InvokerInstanceId(i, "", 0), Healthy)
+  def unhealthy(i: Int) = new InvokerHealth(InvokerInstanceId(i, "", 0), Unhealthy)
+  def offline(i: Int) = new InvokerHealth(InvokerInstanceId(i, "", 0), Offline)
 
   def semaphores(count: Int, max: Int): IndexedSeq[ForcibleSemaphore] =
     IndexedSeq.fill(count)(new ForcibleSemaphore(max))

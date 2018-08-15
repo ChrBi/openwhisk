@@ -67,7 +67,6 @@ trait WhiskTriggersApi extends WhiskCollectionAPI {
     }
     val httpsConfig = loadConfigOrThrow[HttpsConfig]("whisk.controller.https")
     Https.connectionContext(httpsConfig, Some(sslConfig))
-
   }
 
   protected val controllerProtocol = loadConfigOrThrow[String]("whisk.controller.protocol")

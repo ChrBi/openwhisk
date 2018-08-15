@@ -18,8 +18,16 @@
 package whisk.core.entity
 
 import spray.json.DefaultJsonProtocol
-import whisk.core.entity.ControllerInstanceId.LEGAL_CHARS
-import whisk.core.entity.ControllerInstanceId.MAX_NAME_LENGTH
+import whisk.core.entity.ControllerInstanceId.{LEGAL_CHARS, MAX_NAME_LENGTH}
+
+/**
+ * An instance ID representing a component, including the host and port to make requests against it.
+ */
+trait InstanceId {
+  val host: String
+  val port: Int
+  val protocol: String = "https"
+}
 
 /**
  * An instance id representing an invoker
@@ -28,22 +36,30 @@ import whisk.core.entity.ControllerInstanceId.MAX_NAME_LENGTH
  * @param uniqueName an identifier required for dynamic instance assignment by Zookeeper
  * @param displayedName an identifier that is required for the health protocol to correlate Kafka topics with invoker container names
  */
-case class InvokerInstanceId(val instance: Int,
+case class InvokerInstanceId(instance: Int,
+                             override val host: String,
+                             override val port: Int,
                              uniqueName: Option[String] = None,
-                             displayedName: Option[String] = None) {
+                             displayedName: Option[String] = None,
+                             override val protocol: String = "https")
+    extends InstanceId {
   def toInt: Int = instance
 
   override def toString: String = (Seq("invoker" + instance) ++ uniqueName ++ displayedName).mkString("/")
 }
 
-case class ControllerInstanceId(val asString: String) {
+case class ControllerInstanceId(asString: String,
+                                override val host: String,
+                                override val port: Int,
+                                override val protocol: String = "https")
+    extends InstanceId {
   require(
     asString.length <= MAX_NAME_LENGTH && asString.matches(LEGAL_CHARS),
     "Controller instance id contains invalid characters")
 }
 
 object InvokerInstanceId extends DefaultJsonProtocol {
-  implicit val serdes = jsonFormat3(InvokerInstanceId.apply)
+  implicit val serdes = jsonFormat6(InvokerInstanceId.apply)
 }
 
 object ControllerInstanceId extends DefaultJsonProtocol {
@@ -54,5 +70,5 @@ object ControllerInstanceId extends DefaultJsonProtocol {
   // reserve some number of characters as the prefix to be added to topic names
   private val MAX_NAME_LENGTH = 249 - 121
 
-  implicit val serdes = jsonFormat1(ControllerInstanceId.apply)
+  implicit val serdes = jsonFormat4(ControllerInstanceId.apply)
 }

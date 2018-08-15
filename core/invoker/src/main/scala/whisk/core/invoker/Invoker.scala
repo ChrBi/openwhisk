@@ -37,7 +37,11 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Try}
 
-case class CmdLineArgs(uniqueName: Option[String] = None, id: Option[Int] = None, displayedName: Option[String] = None)
+case class CmdLineArgs(uniqueName: Option[String] = None,
+                       id: Option[Int] = None,
+                       displayedName: Option[String] = None,
+                       host: Option[String] = None,
+                       port: Option[Int] = None)
 
 object Invoker {
 
@@ -107,6 +111,8 @@ object Invoker {
     //    --uniqueName <value>   a unique name to dynamically assign Kafka topics from Zookeeper
     //    --displayedName <value> a name to identify this invoker via invoker health protocol
     //    --id <value>     proposed invokerId
+    //    --host <value>   hostname or ip, to make requests against the invoker from another component
+    //    --port <value>   port, to make requests against the invoker from another component
     def parse(ls: List[String], c: CmdLineArgs): CmdLineArgs = {
       ls match {
         case "--uniqueName" :: uniqueName :: tail =>
@@ -115,6 +121,10 @@ object Invoker {
           parse(tail, c.copy(displayedName = nonEmptyString(displayedName)))
         case "--id" :: id :: tail if Try(id.toInt).isSuccess =>
           parse(tail, c.copy(id = Some(id.toInt)))
+        case "--host" :: host :: tail =>
+          parse(tail, c.copy(host = Some(host)))
+        case "--port" :: port :: tail =>
+          parse(tail, c.copy(port = Some(port.toInt)))
         case Nil => c
         case _   => abort(s"Error processing command line arguments $ls")
       }
@@ -124,12 +134,12 @@ object Invoker {
 
     val assignedInvokerId = cmdLineArgs match {
       // --id is defined with a valid value, use this id directly.
-      case CmdLineArgs(_, Some(id), _) =>
+      case CmdLineArgs(_, Some(id), _, _, _) =>
         logger.info(this, s"invokerReg: using proposedInvokerId $id")
         id
 
       // --uniqueName is defined with a valid value, id is empty, assign an id via zookeeper
-      case CmdLineArgs(Some(unique), None, _) =>
+      case CmdLineArgs(Some(unique), None, _, _, _) =>
         if (config.zookeeperHosts.startsWith(":") || config.zookeeperHosts.endsWith(":")) {
           abort(s"Must provide valid zookeeper host and port to use dynamicId assignment (${config.zookeeperHosts})")
         }
@@ -140,9 +150,17 @@ object Invoker {
 
     initKamon(assignedInvokerId)
 
+    val port = config.servicePort.toInt
+
     val topicBaseName = "invoker"
     val topicName = topicBaseName + assignedInvokerId
-    val invokerInstance = InvokerInstanceId(assignedInvokerId, cmdLineArgs.uniqueName, cmdLineArgs.displayedName)
+    val invokerInstance = InvokerInstanceId(
+      assignedInvokerId,
+      cmdLineArgs.host.getOrElse("localhost"),
+      cmdLineArgs.port.getOrElse(port),
+      cmdLineArgs.uniqueName,
+      cmdLineArgs.displayedName,
+      Invoker.protocol)
     val msgProvider = SpiLoader.get[MessagingProvider]
     if (msgProvider.ensureTopic(config, topic = topicName, topicConfig = topicBaseName).isFailure) {
       abort(s"failure during msgProvider.ensureTopic for topic $topicName")
@@ -154,18 +172,17 @@ object Invoker {
       case e: Exception => abort(s"Failed to initialize reactive invoker: ${e.getMessage}")
     }
 
-    Scheduler.scheduleWaitAtMost(1.seconds)(() => {
-      producer.send("health", PingMessage(invokerInstance)).andThen {
-        case Failure(t) => logger.error(this, s"failed to ping the controller: $t")
-      }
-    })
-
-    val port = config.servicePort.toInt
     val httpsConfig =
       if (Invoker.protocol == "https") Some(loadConfigOrThrow[HttpsConfig]("whisk.invoker.https")) else None
 
     BasicHttpService.startHttpService(new BasicRasService {}.route, port, httpsConfig)(
       actorSystem,
       ActorMaterializer.create(actorSystem))
+
+    Scheduler.scheduleWaitAtMost(1.seconds)(() => {
+      producer.send("health", PingMessage(invokerInstance)).andThen {
+        case Failure(t) => logger.error(this, s"failed to ping the controller: $t")
+      }
+    })
   }
 }

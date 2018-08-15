@@ -46,6 +46,8 @@ import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success}
 
+case class CmdLineArgs(instance: Option[String] = None, host: Option[String] = None, port: Option[Int] = None)
+
 /**
  * The Controller is the service that provides the REST API for OpenWhisk.
  *
@@ -221,16 +223,42 @@ object Controller {
     val config = new WhiskConfig(requiredProperties)
     val port = config.servicePort.toInt
 
-    // if deploying multiple instances (scale out), must pass the instance number as the
-    require(args.length >= 1, "controller instance required")
-    val instance = ControllerInstanceId(args(0))
-
     def abort(message: String) = {
       logger.error(this, message)
       actorSystem.terminate()
       Await.result(actorSystem.whenTerminated, 30.seconds)
       sys.exit(1)
     }
+
+    // process command line arguments
+    // We accept the command line grammar of:
+    // Usage: invoker [options] [<proposedInvokerId>]
+    //    --instance <value> instance of this controller
+    //    --host <value>     hostname or ip, to make requests against the invoker from another component
+    //    --port <value>     port, to make requests against the invoker from another component
+    def parse(ls: List[String], c: CmdLineArgs): CmdLineArgs = {
+      ls match {
+        case "--instance" :: instance :: tail =>
+          parse(tail, c.copy(instance = Some(instance)))
+        case "--host" :: host :: tail =>
+          parse(tail, c.copy(host = Some(host)))
+        case "--port" :: port :: tail =>
+          parse(tail, c.copy(port = Some(port.toInt)))
+        case Nil => c
+        case _   => abort(s"Error processing command line arguments $ls")
+      }
+    }
+    val cmdLineArgs = parse(args.toList, CmdLineArgs())
+    logger.info(this, "Command line arguments parsed to yield " + cmdLineArgs)
+
+    // if deploying multiple instances (scale out), must pass the instance number as the
+    require(cmdLineArgs.instance.isDefined, "controller instance required")
+
+    val instance = ControllerInstanceId(
+      cmdLineArgs.instance.getOrElse("0"),
+      cmdLineArgs.host.getOrElse("localhost"),
+      cmdLineArgs.port.getOrElse(port),
+      Controller.protocol)
 
     if (!config.isValid) {
       abort("Bad configuration, cannot start.")

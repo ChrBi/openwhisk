@@ -30,7 +30,7 @@ class ControllerInstanceIdTests extends FlatSpec with Matchers {
 
   it should "accept usable characters" in {
     Seq("a", "1", "a.1", "a_1").foreach { s =>
-      ControllerInstanceId(s).asString shouldBe s
+      ControllerInstanceId(s, "", 0).asString shouldBe s
 
     }
   }
@@ -38,7 +38,7 @@ class ControllerInstanceIdTests extends FlatSpec with Matchers {
   it should "reject unusable characters" in {
     Seq(" ", "!", "$", "a" * 129).foreach { s =>
       an[IllegalArgumentException] shouldBe thrownBy {
-        ControllerInstanceId(s)
+        ControllerInstanceId(s, "", 0)
       }
     }
   }

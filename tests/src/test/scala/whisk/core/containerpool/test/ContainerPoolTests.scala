@@ -78,7 +78,7 @@ class ContainerPoolTests
       action.rev,
       Identity(Subject(), Namespace(invocationNamespace, uuid), BasicAuthenticationAuthKey(uuid, Secret()), Set.empty),
       ActivationId.generate(),
-      ControllerInstanceId("0"),
+      ControllerInstanceId("0", "", 0),
       blocking = false,
       content = None)
     Run(action, message)
