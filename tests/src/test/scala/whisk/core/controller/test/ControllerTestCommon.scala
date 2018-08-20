@@ -251,4 +251,9 @@ class DegenerateLoadBalancerService(config: WhiskConfig)(implicit ec: ExecutionC
     }
 
   override def invokerHealth() = Future.successful(IndexedSeq.empty)
+
+  override def processCompletion(response: Either[ActivationId, WhiskActivation],
+                                 tid: TransactionId,
+                                 forced: Boolean,
+                                 invoker: InvokerInstanceId): Unit = ???
 }

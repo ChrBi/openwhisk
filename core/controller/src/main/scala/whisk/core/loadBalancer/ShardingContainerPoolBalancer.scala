@@ -433,10 +433,10 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   }
 
   /** 5. Process the active-ack and update the state accordingly */
-  private def processCompletion(response: Either[ActivationId, WhiskActivation],
-                                tid: TransactionId,
-                                forced: Boolean,
-                                invoker: InvokerInstanceId): Unit = {
+  def processCompletion(response: Either[ActivationId, WhiskActivation],
+                        tid: TransactionId,
+                        forced: Boolean,
+                        invoker: InvokerInstanceId): Unit = {
     val aid = response.fold(l => l, r => r.activationId)
 
     val invocationResult = if (forced) {

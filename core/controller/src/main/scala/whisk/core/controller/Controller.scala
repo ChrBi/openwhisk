@@ -21,7 +21,7 @@ import akka.Done
 import akka.actor.{ActorSystem, CoordinatedShutdown}
 import akka.event.Logging.InfoLevel
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
-import akka.http.scaladsl.model.Uri
+import akka.http.scaladsl.model.{StatusCodes, Uri}
 import akka.http.scaladsl.server.Route
 import akka.stream.ActorMaterializer
 import kamon.Kamon
@@ -31,7 +31,7 @@ import spray.json._
 import whisk.common.Https.HttpsConfig
 import whisk.common.{AkkaLogging, Logging, LoggingMarkers, TransactionId}
 import whisk.core.WhiskConfig
-import whisk.core.connector.MessagingProvider
+import whisk.core.connector.{CompletionMessage, MessagingProvider}
 import whisk.core.containerpool.logging.LogStoreProvider
 import whisk.core.database.{ActivationStoreProvider, CacheChangeNotification, RemoteCacheInvalidation}
 import whisk.core.entitlement._
@@ -96,7 +96,7 @@ class Controller(val instance: ControllerInstanceId,
       (pathEndOrSingleSlash & get) {
         complete(info)
       }
-    } ~ apiV1.routes ~ swagger.swaggerRoutes ~ internalInvokerHealth
+    } ~ apiV1.routes ~ swagger.swaggerRoutes ~ internalInvokerHealth ~ internalLoadbalancerRoutes
   }
 
   // initialize datastores
@@ -151,6 +151,16 @@ class Controller(val instance: ControllerInstanceId,
             .invokerHealth()
             .map(_.count(_.status == InvokerState.Healthy).toJson)
         }
+      }
+    }
+  }
+
+  private val internalLoadbalancerRoutes = {
+    implicit val executionContext = actorSystem.dispatcher
+    (pathPrefix("completed") & post) {
+      entity(as[CompletionMessage]) { m =>
+        loadBalancer.processCompletion(m.response, m.transid, forced = false, invoker = m.invoker)
+        complete(StatusCodes.Accepted)
       }
     }
   }

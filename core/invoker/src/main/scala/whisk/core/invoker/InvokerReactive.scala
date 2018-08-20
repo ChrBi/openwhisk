@@ -22,11 +22,17 @@ import java.time.Instant
 
 import akka.actor.{ActorRefFactory, ActorSystem, Props}
 import akka.event.Logging.InfoLevel
+import akka.http.scaladsl.{Http, HttpsConnectionContext}
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
+import akka.http.scaladsl.marshalling.Marshal
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest, RequestEntity, Uri}
 import akka.stream.ActorMaterializer
+import com.typesafe.sslconfig.akka.AkkaSSLConfig
 import org.apache.kafka.common.errors.RecordTooLargeException
 import pureconfig._
 import spray.json.DefaultJsonProtocol._
 import spray.json._
+import whisk.common.Https.HttpsConfig
 import whisk.common._
 import whisk.common.tracing.WhiskTracerProvider
 import whisk.core.connector._
@@ -120,13 +126,47 @@ class InvokerReactive(
                      userId: UUID) => {
     implicit val transid: TransactionId = tid
 
+    /** Connection context for HTTPS */
+    lazy val httpsConnectionContext = {
+      val sslConfig = AkkaSSLConfig().mapSettings { s =>
+        s.withLoose(s.loose.withDisableHostnameVerification(true))
+      }
+      val httpsConfig = loadConfigOrThrow[HttpsConfig]("whisk.controller.https")
+      Https.connectionContext(httpsConfig, Some(sslConfig))
+    }
+
+    def connectionContext(protocol: String): HttpsConnectionContext = {
+      if (protocol == "https") {
+        httpsConnectionContext
+      } else {
+        Http().defaultClientHttpsContext
+      }
+    }
+
+    val useHttpForActiveAck = loadConfigOrThrow[Boolean]("whisk.active-ack.use-http")
+
     def send(res: Either[ActivationId, WhiskActivation], recovery: Boolean = false) = {
       val msg = CompletionMessage(transid, res, instance)
-      producer.send(topic = "completed" + controllerInstance.asString, msg).andThen {
+      if (useHttpForActiveAck) {
+        Marshal(msg.toJson)
+          .to[RequestEntity]
+          .flatMap { entity =>
+            Http().singleRequest(
+              HttpRequest(
+                method = HttpMethods.POST,
+                uri = Uri(
+                  s"${controllerInstance.protocol}://${controllerInstance.host}:${controllerInstance.port}/completed"),
+                entity = entity),
+              connectionContext(controllerInstance.protocol))
+          }
+      } else {
+        producer.send(topic = "completed" + controllerInstance.asString, msg)
+      }.andThen {
         case Success(_) =>
           logging.info(
             this,
             s"posted ${if (recovery) "recovery" else "completion"} of activation ${activationResult.activationId}")
+        case Failure(e) => logging.error(this, s"Error on sending active ack because of: $e")
       }
     }
     // Potentially sends activation metadata to kafka if user events are enabled

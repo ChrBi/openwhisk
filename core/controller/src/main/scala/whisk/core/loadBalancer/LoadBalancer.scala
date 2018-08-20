@@ -59,6 +59,12 @@ trait LoadBalancer {
   def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
     implicit transid: TransactionId): Future[Future[Either[ActivationId, WhiskActivation]]]
 
+  /** Process the active-ack and update the state accordingly */
+  def processCompletion(response: Either[ActivationId, WhiskActivation],
+                        tid: TransactionId,
+                        forced: Boolean,
+                        invoker: InvokerInstanceId): Unit
+
   /**
    * Returns a message indicating the health of the containers and/or container pool in general.
    *

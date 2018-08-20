@@ -370,5 +370,10 @@ class ConductorsApiTests extends ControllerTestCommon with WhiskActionsApi {
           }
         }
       } getOrElse Future.failed(new IllegalArgumentException("No invocation parameters in conductor test"))
+
+    override def processCompletion(response: Either[ActivationId, WhiskActivation],
+                                   tid: TransactionId,
+                                   forced: Boolean,
+                                   invoker: InvokerInstanceId): Unit = ???
   }
 }
