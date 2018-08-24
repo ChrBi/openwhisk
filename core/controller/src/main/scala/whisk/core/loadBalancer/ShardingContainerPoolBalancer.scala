@@ -249,11 +249,12 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
     }
 
     chosen
-      .map { invoker =>
-        val entry = setupActivation(msg, action, invoker)
-        sendActivationToInvoker(messageProducer, msg, invoker).map { _ =>
-          entry.promise.future
-        }
+      .map {
+        case (invoker, isInvokerOverloaded) =>
+          val entry = setupActivation(msg, action, invoker)
+          sendActivationToInvoker(messageProducer, msg, invoker, isInvokerOverloaded).map { _ =>
+            entry.promise.future
+          }
       }
       .getOrElse {
         // report the state of all invokers
@@ -384,15 +385,16 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
 
   private def sendActivationToInvoker(producer: MessageProducer,
                                       msg: ActivationMessage,
-                                      invoker: InvokerInstanceId): Future[Unit] = {
+                                      invoker: InvokerInstanceId,
+                                      isInvokerOverloaded: Boolean = false): Future[Unit] = {
     implicit val transid: TransactionId = msg.transid
 
     MetricEmitter.emitCounterMetric(LoggingMarkers.LOADBALANCER_ACTIVATION_START)
 
-    if (!lbConfig.useHttp) {
-      sendActivationWithKafka(producer, msg, invoker)
-    } else {
+    if (lbConfig.useHttp && !isInvokerOverloaded) {
       sendActivationWithHttp(msg, invoker)
+    } else {
+      sendActivationWithKafka(producer, msg, invoker)
     }
   }
 
@@ -533,22 +535,23 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
    * @param slots Number of slots, that need to be acquired (e.g. memory in MB)
    * @param index the index to start from (initially should be the "homeInvoker"
    * @param step stable identifier of the entity to be scheduled
-   * @return an invoker to schedule to or None of no invoker is available
+   * @return an invoker to schedule to and if it is overloaded currently or None of no invoker is available
    */
   @tailrec
-  def schedule(invokers: IndexedSeq[InvokerHealth],
-               dispatched: IndexedSeq[ForcibleSemaphore],
-               slots: Int,
-               index: Int,
-               step: Int,
-               stepsDone: Int = 0)(implicit logging: Logging, transId: TransactionId): Option[InvokerInstanceId] = {
+  def schedule(
+    invokers: IndexedSeq[InvokerHealth],
+    dispatched: IndexedSeq[ForcibleSemaphore],
+    slots: Int,
+    index: Int,
+    step: Int,
+    stepsDone: Int = 0)(implicit logging: Logging, transId: TransactionId): Option[(InvokerInstanceId, Boolean)] = {
     val numInvokers = invokers.size
 
     if (numInvokers > 0) {
       val invoker = invokers(index)
       // If the current invoker is healthy and we can get a slot
       if (invoker.status.isUsable && dispatched(invoker.id.toInt).tryAcquire(slots)) {
-        Some(invoker.id)
+        Some(invoker.id, false)
       } else {
         // If we've gone through all invokers
         if (stepsDone == numInvokers + 1) {
@@ -558,7 +561,7 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
             val random = healthyInvokers(ThreadLocalRandom.current().nextInt(healthyInvokers.size)).id
             dispatched(random.toInt).forceAcquire(slots)
             logging.warn(this, s"system is overloaded. Chose invoker${random.toInt} by random assignment.")
-            Some(random)
+            Some(random, true)
           } else {
             None
           }

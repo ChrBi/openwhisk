@@ -194,47 +194,53 @@ class ShardingContainerPoolBalancerTests extends FlatSpec with Matchers with Str
     val invokerSlots = semaphores(invokerCount + 3, 3) // needs to be offset by 3 as well
     val invokers = (0 until invokerCount).map(i => healthy(i + 3)) // offset by 3 to asset InstanceId is returned
 
-    val expectedResult = Seq(3, 3, 3, 5, 5, 5, 4, 4, 4)
-    val result = expectedResult.map { _ =>
-      ShardingContainerPoolBalancer
-        .schedule(invokers, invokerSlots, 1, index = 0, step = 2)
-        .get
-        .toInt
-    }
+    val expectedResult =
+      Seq((3, false), (3, false), (3, false), (5, false), (5, false), (5, false), (4, false), (4, false), (4, false))
+    val result = expectedResult
+      .map { _ =>
+        ShardingContainerPoolBalancer
+          .schedule(invokers, invokerSlots, 1, index = 0, step = 2)
+          .get
+      }
+      .map(r => (r._1.toInt, r._2))
 
     result shouldBe expectedResult
 
-    val bruteResult = (0 to 100).map { _ =>
-      ShardingContainerPoolBalancer
-        .schedule(invokers, invokerSlots, 1, index = 0, step = 2)
-        .get
-        .toInt
-    }
+    val bruteResult = (0 to 100)
+      .map { _ =>
+        ShardingContainerPoolBalancer
+          .schedule(invokers, invokerSlots, 1, index = 0, step = 2)
+          .get
+      }
+      .map(r => (r._1.toInt, r._2))
 
-    bruteResult should contain allOf (3, 4, 5)
+    bruteResult should contain allOf ((3, true), (4, true), (5, true))
   }
 
   it should "ignore unhealthy or offline invokers" in {
     val invokers = IndexedSeq(healthy(0), unhealthy(1), offline(2), healthy(3))
     val invokerSlots = semaphores(invokers.size, 3)
 
-    val expectedResult = Seq(0, 0, 0, 3, 3, 3)
-    val result = expectedResult.map { _ =>
-      ShardingContainerPoolBalancer
-        .schedule(invokers, invokerSlots, 1, index = 0, step = 1)
-        .get
-        .toInt
-    }
+    val expectedResult = Seq((0, false), (0, false), (0, false), (3, false), (3, false), (3, false))
+    val result = expectedResult
+      .map { _ =>
+        ShardingContainerPoolBalancer
+          .schedule(invokers, invokerSlots, 1, index = 0, step = 1)
+          .get
+      }
+      .map(r => (r._1.toInt, r._2))
 
     result shouldBe expectedResult
 
     // more schedules will result in randomized invokers, but the unhealthy and offline invokers should not be part
-    val bruteResult = (0 to 100).map { _ =>
-      ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 1, index = 0, step = 1).get.toInt
-    }
+    val bruteResult = (0 to 100)
+      .map { _ =>
+        ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 1, index = 0, step = 1).get
+      }
+      .map(r => (r._1.toInt, r._2))
 
-    bruteResult should contain allOf (0, 3)
-    bruteResult should contain noneOf (1, 2)
+    bruteResult should contain allOf ((0, true), (3, true))
+    bruteResult should contain noneOf ((1, true), (1, false), (2, true), (2, false))
   }
 
   it should "only take invokers that have enough free slots" in {
@@ -244,15 +250,15 @@ class ShardingContainerPoolBalancerTests extends FlatSpec with Matchers with Str
     val invokers = (0 until invokerCount).map(i => healthy(i))
 
     // Ask for three slots -> First invoker should be used
-    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 3, index = 0, step = 1).get.toInt shouldBe 0
+    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 3, index = 0, step = 1).get._1.toInt shouldBe 0
     // Ask for two slots -> Second invoker should be used
-    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 2, index = 0, step = 1).get.toInt shouldBe 1
+    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 2, index = 0, step = 1).get._1.toInt shouldBe 1
     // Ask for 1 slot -> First invoker should be used
-    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 1, index = 0, step = 1).get.toInt shouldBe 0
+    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 1, index = 0, step = 1).get._1.toInt shouldBe 0
     // Ask for 4 slots -> Third invoker should be used
-    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 4, index = 0, step = 1).get.toInt shouldBe 2
+    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 4, index = 0, step = 1).get._1.toInt shouldBe 2
     // Ask for 2 slots -> Second invoker should be used
-    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 2, index = 0, step = 1).get.toInt shouldBe 1
+    ShardingContainerPoolBalancer.schedule(invokers, invokerSlots, 2, index = 0, step = 1).get._1.toInt shouldBe 1
 
     invokerSlots.foreach(_.availablePermits shouldBe 0)
   }
