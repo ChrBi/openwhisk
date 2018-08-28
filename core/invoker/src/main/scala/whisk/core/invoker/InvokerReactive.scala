@@ -145,22 +145,34 @@ class InvokerReactive(
 
     val useHttpForActiveAck = loadConfigOrThrow[Boolean]("whisk.active-ack.use-http")
 
+    def sendActiveAckWithKafka(msg: CompletionMessage) = {
+      producer.send(topic = "completed" + controllerInstance.asString, msg)
+    }
+
+    def sendActiveAckWithHttp(msg: CompletionMessage) = {
+      Marshal(msg.toJson)
+        .to[RequestEntity]
+        .flatMap { entity =>
+          Http().singleRequest(
+            HttpRequest(
+              method = HttpMethods.POST,
+              uri = Uri(
+                s"${controllerInstance.protocol}://${controllerInstance.host}:${controllerInstance.port}/completed"),
+              entity = entity),
+            connectionContext(controllerInstance.protocol))
+        }
+    }
+
     def send(res: Either[ActivationId, WhiskActivation], recovery: Boolean = false) = {
       val msg = CompletionMessage(transid, res, instance)
       if (useHttpForActiveAck) {
-        Marshal(msg.toJson)
-          .to[RequestEntity]
-          .flatMap { entity =>
-            Http().singleRequest(
-              HttpRequest(
-                method = HttpMethods.POST,
-                uri = Uri(
-                  s"${controllerInstance.protocol}://${controllerInstance.host}:${controllerInstance.port}/completed"),
-                entity = entity),
-              connectionContext(controllerInstance.protocol))
-          }
+        sendActiveAckWithHttp(msg).recoverWith {
+          case t: Throwable =>
+            logging.error(this, s"Was not able to send active ack with http because of $t. Will fallback to Kafka.")
+            sendActiveAckWithKafka(msg)
+        }
       } else {
-        producer.send(topic = "completed" + controllerInstance.asString, msg)
+        sendActiveAckWithKafka(msg)
       }.andThen {
         case Success(_) =>
           logging.info(
