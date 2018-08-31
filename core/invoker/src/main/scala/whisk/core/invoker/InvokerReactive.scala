@@ -118,6 +118,19 @@ class InvokerReactive(
     new MessageFeed("activation", logging, consumer, maximumContainers, 1.second, processActivationMessage)
   })
 
+  /** Connection context for HTTPS */
+  lazy val httpsConnectionContext = {
+    val sslConfig = AkkaSSLConfig().mapSettings { s =>
+      s.withLoose(s.loose.withDisableHostnameVerification(true))
+    }
+    val httpsConfig = loadConfigOrThrow[HttpsConfig]("whisk.controller.https")
+    Https.connectionContext(httpsConfig, Some(sslConfig))
+  }
+
+  lazy val httpConnectionContext = Http().defaultClientHttpsContext
+
+  val useHttpForActiveAck = loadConfigOrThrow[Boolean]("whisk.active-ack.use-http")
+
   /** Sends an active-ack. */
   private val ack = (tid: TransactionId,
                      activationResult: WhiskActivation,
@@ -126,24 +139,13 @@ class InvokerReactive(
                      userId: UUID) => {
     implicit val transid: TransactionId = tid
 
-    /** Connection context for HTTPS */
-    lazy val httpsConnectionContext = {
-      val sslConfig = AkkaSSLConfig().mapSettings { s =>
-        s.withLoose(s.loose.withDisableHostnameVerification(true))
-      }
-      val httpsConfig = loadConfigOrThrow[HttpsConfig]("whisk.controller.https")
-      Https.connectionContext(httpsConfig, Some(sslConfig))
-    }
-
     def connectionContext(protocol: String): HttpsConnectionContext = {
       if (protocol == "https") {
         httpsConnectionContext
       } else {
-        Http().defaultClientHttpsContext
+        httpConnectionContext
       }
     }
-
-    val useHttpForActiveAck = loadConfigOrThrow[Boolean]("whisk.active-ack.use-http")
 
     def sendActiveAckWithKafka(msg: CompletionMessage) = {
       producer.send(topic = "completed" + controllerInstance.asString, msg)
